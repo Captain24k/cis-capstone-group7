@@ -3,7 +3,7 @@
 
 <head>
 	<meta charset="utf-8" />
-	<title>Anonymous Feedback</title>
+	<title>Login & Anonymous Feedback</title>
 
 	<!--DO NOT FORGET THIS SCRIPT TAG SO YOU CAN USE JQUERY!!!!! -->
 	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
@@ -12,12 +12,51 @@
 	<script type="text/javascript">
 
 		////////////////////////////////////////////////////////////////////////
-		
+		// LOGIN FUNCTION user abcd pass 1234
+		////////////////////////////////////////////////////////////////////////
+		function LoginHandler() {
+
+			$("#loginMsg").text("");
+
+			var email = $("#txtEmail").val();
+			var password = $("#txtPassword").val();
+
+			if (email == "" || password == "") {
+				$("#loginMsg").css("color", "red");
+				$("#loginMsg").text("Please enter email and password.");
+				return;
+			}
+
+
+			var correctEmail = "abcd";
+			var correctPassword = "1234";
+
+			if (email == correctEmail && password == correctPassword) {
+
+				$("#loginMsg").css("color", "green");
+				$("#loginMsg").text("Login successful.");
+
+				// hide login, show feedback
+				$("#loginSection").hide();
+				$("#feedbackSection").show();
+			}
+			else {
+				$("#loginMsg").css("color", "red");
+				$("#loginMsg").text("Invalid email or password.");
+			}
+		}
+		////////////////////////////////////////////////////////////////////////
+		// END LOGIN FUNCTION
+		////////////////////////////////////////////////////////////////////////
+
+
+		////////////////////////////////////////////////////////////////////////
+		//  TEST CONNECTION FUNCTION 
+		////////////////////////////////////////////////////////////////////////
 		function TestButtonHandler() {
 			var webMethod = "ProjectServices.asmx/TestConnection";
 			var parameters = "{}";
 
-			//jQuery ajax method
 			$.ajax({
 				type: "POST",
 				url: webMethod,
@@ -25,8 +64,7 @@
 				contentType: "application/json; charset=utf-8",
 				dataType: "json",
 				success: function (msg) {
-					var responseFromServer = msg.d;
-					alert(responseFromServer);
+					alert(msg.d);
 				},
 				error: function (e) {
 					alert("this code will only execute if javascript is unable to access the webservice");
@@ -34,33 +72,30 @@
 			});
 		}
 		////////////////////////////////////////////////////////////////////////
-	
+		// END TEST CONNECTION
+		////////////////////////////////////////////////////////////////////////
+
 
 		////////////////////////////////////////////////////////////////////////
-		// SUBMIT ANONYMOUS FEEDBACK
-		
+		// ANONYMOUS FEEDBACK 
+		////////////////////////////////////////////////////////////////////////
 		function SubmitFeedbackHandler() {
 
-			// clear previous message
-			$("#msg").text("");
+			$("#feedbackMsg").text("");
 
-			// get values from the form
 			var department = $("#ddlDepartment").val();
 			var category = $("#ddlCategory").val();
 			var subject = $("#txtSubject").val();
 			var feedbackText = $("#txtFeedback").val();
 
-			// simple validation
 			if (department == "" || category == "" || subject == "" || feedbackText == "") {
-				$("#msg").css("color", "red");
-				$("#msg").text("Please fill out all fields before submitting.");
+				$("#feedbackMsg").css("color", "red");
+				$("#feedbackMsg").text("Please fill out all fields.");
 				return;
 			}
 
-			// disable submit button
 			$("#btnSubmit").prop("disabled", true);
 
-			// send data to the web service
 			$.ajax({
 				type: "POST",
 				url: "ProjectServices.asmx/SubmitAnonymousFeedback",
@@ -74,28 +109,25 @@
 				dataType: "json",
 				success: function (msg) {
 
-					// show success message
-					$("#msg").css("color", "green");
-					$("#msg").text("Feedback submitted successfully. Thank you!");
+					$("#feedbackMsg").css("color", "green");
+					$("#feedbackMsg").text("Feedback submitted successfully.");
 
-					// clear form fields
 					$("#ddlDepartment").val("");
 					$("#ddlCategory").val("");
 					$("#txtSubject").val("");
 					$("#txtFeedback").val("");
 				},
 				error: function () {
-					$("#msg").css("color", "red");
-					$("#msg").text("Error submitting feedback. Please try again.");
+					$("#feedbackMsg").css("color", "red");
+					$("#feedbackMsg").text("Error submitting feedback.");
 				},
 				complete: function () {
-					// re-enable submit button
 					$("#btnSubmit").prop("disabled", false);
 				}
 			});
 		}
 		////////////////////////////////////////////////////////////////////////
-		// END OF NEW FUNCTION
+		// END FEEDBACK SUBMISSION
 		////////////////////////////////////////////////////////////////////////
 
 	</script>
@@ -106,8 +138,6 @@
 		body {
 			font-family: Arial;
 			background: #f4f4f4;
-			margin: 0;
-			padding: 0;
 		}
 
 		.box {
@@ -119,65 +149,44 @@
 			border-radius: 6px;
 		}
 
-		h2 {
-			margin-top: 0;
-		}
-
 		label {
 			display: block;
 			margin-top: 12px;
 			font-weight: bold;
 		}
 
-		select,
 		input,
+		select,
 		textarea {
 			width: 100%;
-			box-sizing: border-box;
 			padding: 8px;
 			margin-top: 6px;
 			border: 1px solid #bbb;
 			border-radius: 4px;
-			font-size: 14px;
 		}
 
 		textarea {
 			height: 120px;
-			resize: vertical;
-		}
-
-		.buttons {
-			margin-top: 15px;
 		}
 
 		button {
+			margin-top: 15px;
 			padding: 8px 12px;
 			border: none;
 			border-radius: 4px;
 			cursor: pointer;
-			margin-right: 8px;
-		}
-
-		#btnSubmit {
 			background: #2d7ef7;
 			color: white;
 		}
 
-		#btnTest {
-			background: #444;
-			color: white;
+		#feedbackSection {
+			display: none;
 		}
 
-		#msg {
-			margin-top: 12px;
-			font-size: 14px;
+		.msg {
+			margin-top: 10px;
 			min-height: 18px;
-		}
-
-		.note {
-			font-size: 12px;
-			color: #555;
-			margin-bottom: 10px;
+			font-size: 14px;
 		}
 	</style>
 	<!--END OF YOUR OWN CSS-->
@@ -185,43 +194,55 @@
 </head>
 
 <body>
-	<div class="box">
-		<h2>Anonymous Feedback</h2>
-		<p class="note">Submit feedback without logging in. Your name is not collected.</p>
 
-		<label for="ddlDepartment">Department</label>
+	<!-- LOGIN SECTION -->
+	<div class="box" id="loginSection">
+		<h2>Login</h2>
+
+		<label>Email</label>
+		<input id="txtEmail" type="text" />
+
+		<label>Password</label>
+		<input id="txtPassword" type="password" />
+
+		<button onclick="LoginHandler()">Login</button>
+
+		<div id="loginMsg" class="msg"></div>
+	</div>
+
+	<!-- FEEDBACK SECTION -->
+	<div class="box" id="feedbackSection">
+		<h2>Anonymous Feedback</h2>
+
+		<label>Department</label>
 		<select id="ddlDepartment">
-			<option value="">-- Select Department --</option>
+			<option value="">Select Department</option>
 			<option value="HR">HR</option>
 			<option value="IT">IT</option>
 			<option value="Finance">Finance</option>
 			<option value="Operations">Operations</option>
-			<option value="Other">Other</option>
 		</select>
 
-		<label for="ddlCategory">Category</label>
+		<label>Category</label>
 		<select id="ddlCategory">
-			<option value="">-- Select Category --</option>
+			<option value="">Select Category</option>
 			<option value="Safety">Safety</option>
-			<option value="Work Environment">Work Environment</option>
 			<option value="Management">Management</option>
-			<option value="Pay/Benefits">Pay/Benefits</option>
-			<option value="Other">Other</option>
+			<option value="Work Environment">Work Environment</option>
 		</select>
 
-		<label for="txtSubject">Subject</label>
-		<input id="txtSubject" type="text" placeholder="Short subject..." />
+		<label>Subject</label>
+		<input id="txtSubject" type="text" />
 
-		<label for="txtFeedback">Feedback</label>
-		<textarea id="txtFeedback" placeholder="Write your feedback..."></textarea>
+		<label>Feedback</label>
+		<textarea id="txtFeedback"></textarea>
 
-		<div class="buttons">
-			<button id="btnSubmit" onclick="SubmitFeedbackHandler()">Submit</button>
-			<button id="btnTest" onclick="TestButtonHandler()">Test Connection</button>
-		</div>
+		<button id="btnSubmit" onclick="SubmitFeedbackHandler()">Submit Feedback</button>
+		<button onclick="TestButtonHandler()">Test Connection</button>
 
-		<div id="msg"></div>
+		<div id="feedbackMsg" class="msg"></div>
 	</div>
+
 </body>
 
 </html>
