@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8" />
+	<title>Login</title>
+
+	<style>
+		body { font-family: Arial; background:#f4f4f4; margin:0; }
+		.box { width:420px; margin:60px auto; background:#fff; padding:20px; border:1px solid #ddd; border-radius:6px; }
+		h2 { margin-top:0; }
+		label { display:block; margin-top:12px; font-weight:bold; }
+		input { width:100%; box-sizing:border-box; padding:8px; margin-top:6px; border:1px solid #bbb; border-radius:4px; }
+		button { margin-top:15px; padding:8px 12px; border:none; border-radius:4px; cursor:pointer; background:#2d7ef7; color:#fff; }
+		.note { font-size:12px; color:#555; margin-bottom:10px; }
+		#msg { margin-top:12px; min-height:18px; font-size:14px; }
+	</style>
+
+	<script>
+		// hardcoded accounts
+		var employeeId = "abcd";
+		var employeePass = "1234";
+
+		var managerId = "manager";
+		var managerPass = "12345";
+
+		function LoginHandler() {
+
+			var id = document.getElementById("txtId").value.trim();
+			var pass = document.getElementById("txtPass").value.trim();
+			var msg = document.getElementById("msg");
+
+			msg.innerText = "";
+
+			if (id === "" || pass === "") {
+				msg.style.color = "red";
+				msg.innerText = "Please enter ID and password.";
+				return;
+			}
+
+			// employee -> employee.html
+			if (id === employeeId && pass === employeePass) {
+				localStorage.setItem("role", "employee");
+				window.location.href = "employee.html";
+				return;
+			}
+
+			// manager -> manager.html
+			if (id === managerId && pass === managerPass) {
+				localStorage.setItem("role", "manager");
+				window.location.href = "manager.html";
+				return;
+			}
+
+			msg.style.color = "red";
+			msg.innerText = "Invalid ID or password.";
+		}
+	</script>
+</head>
+
+<body>
+	<div class="box">
+		<h2>Login</h2>
+
+		<p class="note">
+			Employee → <b>abcd</b> / <b>1234</b><br>
+			Manager → <b>manager</b> / <b>12345</b>
+		</p>
+
+		<label for="txtId">ID</label>
+		<input id="txtId" type="text" placeholder="Enter ID" />
+
+		<label for="txtPass">Password</label>
+		<input id="txtPass" type="password" placeholder="Enter password" />
+
+		<button onclick="LoginHandler()">Login</button>
+
+		<div id="msg"></div>
+	</div>
+</body>
+</html>

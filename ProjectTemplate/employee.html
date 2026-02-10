@@ -1,0 +1,114 @@
+<!-- ===========================
+File: employee.html
+=========================== -->
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8" />
+	<title>Anonymous Feedback (Employee)</title>
+
+	<style>
+		body { font-family: Arial; background:#f4f4f4; margin:0; }
+		.box { width:520px; margin:40px auto; background:#fff; padding:20px; border:1px solid #ddd; border-radius:6px; }
+		h2 { margin-top:0; }
+		label { display:block; margin-top:12px; font-weight:bold; }
+		select, input, textarea { width:100%; box-sizing:border-box; padding:8px; margin-top:6px; border:1px solid #bbb; border-radius:4px; font-size:14px; }
+		textarea { height:120px; resize:vertical; }
+		button { margin-top:15px; padding:8px 12px; border:none; border-radius:4px; cursor:pointer; margin-right:8px; }
+		.primary { background:#2d7ef7; color:#fff; }
+		.dark { background:#444; color:#fff; }
+		.note { font-size:12px; color:#555; margin-bottom:10px; }
+		#msg { margin-top:12px; min-height:18px; font-size:14px; }
+	</style>
+
+	<script>
+		// simple page guard
+		window.onload = function () {
+			var role = localStorage.getItem("role");
+			if (role !== "employee") {
+				window.location.href = "index.html";
+			}
+		};
+
+		function Logout() {
+			localStorage.removeItem("role");
+			window.location.href = "index.html";
+		}
+
+		function SubmitFeedbackHandler() {
+			var department = document.getElementById("ddlDepartment").value;
+			var category = document.getElementById("ddlCategory").value;
+			var subject = document.getElementById("txtSubject").value.trim();
+			var feedbackText = document.getElementById("txtFeedback").value.trim();
+
+			document.getElementById("msg").innerText = "";
+
+			if (department === "" || category === "" || subject === "" || feedbackText === "") {
+				document.getElementById("msg").style.color = "red";
+				document.getElementById("msg").innerText = "Please fill out all fields.";
+				return;
+			}
+
+			var list = JSON.parse(localStorage.getItem("feedbackList") || "[]");
+
+			list.push({
+				id: Date.now(),
+				date: new Date().toLocaleString(),
+				department: department,
+				category: category,
+				subject: subject,
+				feedbackText: feedbackText
+			});
+
+			localStorage.setItem("feedbackList", JSON.stringify(list));
+
+			document.getElementById("msg").style.color = "green";
+			document.getElementById("msg").innerText = "Feedback submitted successfully.";
+
+			// clear inputs
+			document.getElementById("ddlDepartment").value = "";
+			document.getElementById("ddlCategory").value = "";
+			document.getElementById("txtSubject").value = "";
+			document.getElementById("txtFeedback").value = "";
+		}
+	</script>
+</head>
+
+<body>
+	<div class="box">
+		<h2>Anonymous Feedback (Employee)</h2>
+		<p class="note">emp suyrvey .</p>
+
+		<label for="ddlDepartment">Department</label>
+		<select id="ddlDepartment">
+			<option value="">-- Select Department --</option>
+			<option value="HR">HR</option>
+			<option value="IT">IT</option>
+			<option value="Finance">Finance</option>
+			<option value="Operations">Operations</option>
+			<option value="Other">Other</option>
+		</select>
+
+		<label for="ddlCategory">Category</label>
+		<select id="ddlCategory">
+			<option value="">-- Select Category --</option>
+			<option value="Safety">Safety</option>
+			<option value="Work Environment">Work Environment</option>
+			<option value="Management">Management</option>
+			<option value="Pay/Benefits">Pay/Benefits</option>
+			<option value="Other">Other</option>
+		</select>
+
+		<label for="txtSubject">Subject</label>
+		<input id="txtSubject" type="text" placeholder="Short subject..." />
+
+		<label for="txtFeedback">Feedback</label>
+		<textarea id="txtFeedback" placeholder="Write your feedback..."></textarea>
+
+		<button class="primary" onclick="SubmitFeedbackHandler()">Submit</button>
+		<button class="dark" onclick="Logout()">Logout</button>
+
+		<div id="msg"></div>
+	</div>
+</body>
+</html>
