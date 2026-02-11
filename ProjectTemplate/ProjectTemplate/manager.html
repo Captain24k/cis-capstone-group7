@@ -1,152 +1,280 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8" />
-    <title>Manager Dashboard</title>
+<meta charset="utf-8" />
+<title>Manager Dashboard</title>
 
-    <style>
-        body {
-            font-family: Arial;
-            background: #f4f4f4;
-            margin: 0;
-        }
+<style>
+body {
+    font-family: Arial;
+    background: #f4f4f4;
+    margin: 0;
+}
 
-        .box {
-            width: 900px;
-            margin: 40px auto;
-            background: #fff;
-            padding: 20px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-        }
+.box {
+    width: 900px;
+    margin: 40px auto;
+    background: #fff;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+}
 
-        h2 {
-            margin-top: 0;
-        }
+h2 {
+    margin-top: 0;
+}
 
-        button {
-            margin-top: 10px;
-            padding: 8px 12px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            margin-right: 8px;
-        }
+button {
+    margin-top: 10px;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 8px;
+}
 
-        .primary {
-            background: #2d7ef7;
-            color: #fff;
-        }
+.primary {
+    background: #2d7ef7;
+    color: #fff;
+}
 
-        .dark {
-            background: #444;
-            color: #fff;
-        }
+.dark {
+    background: #444;
+    color: #fff;
+}
 
-        #msg {
-            margin-top: 12px;
-            min-height: 18px;
-            font-size: 14px;
-        }
+#msg {
+    margin-top: 12px;
+    min-height: 18px;
+    font-size: 14px;
+}
 
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            margin-top: 15px;
-        }
+#tableWrap {
+    margin-top: 15px;
+    max-height: 360px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+}
 
-        th, td {
-            border: 1px solid #ccc;
-            padding: 8px;
-            text-align: left;
-            font-size: 13px;
-        }
+table {
+    border-collapse: collapse;
+    width: 100%;
+}
 
-        th {
-            background: #eee;
-        }
-    </style>
+th, td {
+    border-bottom: 1px solid #eee;
+    padding: 10px;
+    text-align: left;
+    font-size: 13px;
+}
 
-    <script>
+th {
+    background: #f7f7f7;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
 
-        window.onload = function () {
-            var role = localStorage.getItem("role");
-            if (role !== "manager") {
-                window.location.href = "index.html";
-                return;
-            }
-            LoadFeedback();
-        };
+tr.itemRow {
+    cursor: pointer;
+}
 
-        function Logout() {
-            localStorage.removeItem("role");
-            window.location.href = "index.html";
-        }
+tr.itemRow:hover {
+    background: #fafafa;
+}
 
-        function LoadFeedback() {
+#detailBox {
+    margin-top: 15px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 12px;
+    display: none;
+}
 
-            fetch("http://localhost:50287/ProjectServices.asmx/GetFeedback", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json; charset=utf-8"
-                },
-                body: "{}"
-            })
-            .then(response => response.json())
-            .then(result => {
+.detailRow {
+    margin-top: 6px;
+    font-size: 13px;
+}
 
-                // IMPORTANT: result.d is a STRING → must parse
-                var list = JSON.parse(result.d);
+.detailLabel {
+    font-weight: bold;
+}
 
-                var holder = document.getElementById("tableHolder");
-                var msg = document.getElementById("msg");
+#detailText {
+    margin-top: 10px;
+    white-space: pre-wrap;
+    border: 1px solid #eee;
+    border-radius: 6px;
+    padding: 10px;
+    background: #fcfcfc;
+}
+</style>
 
-                holder.innerHTML = "";
+<script>
+var refreshTimer = null;
+var lastSnapshot = "";
 
-                if (!list || list.length === 0) {
-                    msg.style.color = "red";
-                    msg.innerText = "No feedback found.";
-                    return;
-                }
+window.onload = function () {
+    var role = localStorage.getItem("role");
+    if (role !== "manager") {
+        window.location.href = "index.html";
+        return;
+    }
+    LoadFeedback(true);
+    refreshTimer = setInterval(function () { LoadFeedback(false); }, 4000);
+};
 
-                var html = "<table>";
-                html += "<tr><th>ID</th><th>Date</th><th>Department</th><th>Category</th><th>Subject</th><th>Feedback</th></tr>";
+function Logout() {
+    localStorage.removeItem("role");
+    window.location.href = "index.html";
+}
 
-                for (var i = 0; i < list.length; i++) {
-                    html += "<tr>";
-                    html += "<td>" + list[i].id + "</td>";
-                    html += "<td>" + list[i].date + "</td>";
-                    html += "<td>" + list[i].department + "</td>";
-                    html += "<td>" + list[i].category + "</td>";
-                    html += "<td>" + list[i].subject + "</td>";
-                    html += "<td>" + list[i].feedbackText + "</td>";
-                    html += "</tr>";
-                }
+function SafeStr(v) {
+    if (v === null || v === undefined) return "";
+    return String(v);
+}
 
-                html += "</table>";
+function SafeNum(v) {
+    var n = Number(v);
+    if (isNaN(n)) return 0;
+    return n;
+}
 
-                holder.innerHTML = html;
+function LoadFeedback(showMsg) {
+    fetch("http://localhost:50287/ProjectServices.asmx/GetFeedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: "{}"
+    })
+    .then(res => res.json())
+    .then(result => {
+        var raw = result && result.d ? result.d : "[]";
+        var list = [];
+        try { list = JSON.parse(raw); } catch (e) { list = []; }
+
+        var snapshot = JSON.stringify(list);
+        if (!showMsg && snapshot === lastSnapshot) return;
+        lastSnapshot = snapshot;
+
+        RenderTable(list);
+
+        var msg = document.getElementById("msg");
+        if (showMsg) {
+            if (!list || list.length === 0) {
+                msg.style.color = "red";
+                msg.innerText = "No feedback found.";
+            } else {
                 msg.style.color = "green";
                 msg.innerText = "Loaded " + list.length + " feedback item(s).";
-
-            })
-            .catch(error => {
-                document.getElementById("msg").innerText = "Error loading data: " + error;
-            });
+            }
         }
+    })
+    .catch(err => {
+        var msg = document.getElementById("msg");
+        msg.style.color = "red";
+        msg.innerText = "Error loading data.";
+    });
+}
 
-    </script>
+function RenderTable(list) {
+    var holder = document.getElementById("tableHolder");
+    var detailBox = document.getElementById("detailBox");
+    detailBox.style.display = "none";
+
+    if (!list || list.length === 0) {
+        holder.innerHTML = "";
+        return;
+    }
+
+    var html = "";
+    html += "<div id='tableWrap'>";
+    html += "<table>";
+    html += "<tr>";
+    html += "<th>Category</th>";
+    html += "<th>Topic</th>";
+    html += "<th>Upvotes</th>";
+    html += "<th>Status</th>";
+    html += "</tr>";
+
+    for (var i = 0; i < list.length; i++) {
+        var item = list[i] || {};
+        var category = SafeStr(item.category);
+        var topic = SafeStr(item.topic || item.subject);
+        var upvotes = SafeNum(item.upvotes);
+        var status = SafeStr(item.status || "New");
+
+        html += "<tr class='itemRow' onclick='ShowDetails(" + i + ")'>";
+        html += "<td>" + category + "</td>";
+        html += "<td>" + topic + "</td>";
+        html += "<td>" + upvotes + "</td>";
+        html += "<td>" + status + "</td>";
+        html += "</tr>";
+    }
+
+    html += "</table>";
+    html += "</div>";
+
+    holder.innerHTML = html;
+
+    window._feedbackCache = list;
+}
+
+function ShowDetails(index) {
+    var list = window._feedbackCache || [];
+    var item = list[index] || {};
+
+    var id = SafeStr(item.id || item.feedbackId || "");
+    var date = SafeStr(item.date || item.createdAt || "");
+    var department = SafeStr(item.department || "");
+    var category = SafeStr(item.category || "");
+    var topic = SafeStr(item.topic || item.subject || "");
+    var subject = SafeStr(item.subject || "");
+    var upvotes = SafeNum(item.upvotes);
+    var status = SafeStr(item.status || "New");
+    var feedbackText = SafeStr(item.feedbackText || item.feedback || "");
+
+    document.getElementById("d_id").innerText = id;
+    document.getElementById("d_date").innerText = date;
+    document.getElementById("d_dept").innerText = department;
+    document.getElementById("d_category").innerText = category;
+    document.getElementById("d_topic").innerText = topic;
+    document.getElementById("d_subject").innerText = subject;
+    document.getElementById("d_upvotes").innerText = upvotes;
+    document.getElementById("d_status").innerText = status;
+    document.getElementById("detailText").innerText = feedbackText;
+
+    var detailBox = document.getElementById("detailBox");
+    detailBox.style.display = "block";
+}
+</script>
+
 </head>
 
 <body>
-    <div class="box">
-        <h2>Manager Dashboard</h2>
+<div class="box">
+    <h2>Manager Dashboard</h2>
 
-        <button class="primary" onclick="LoadFeedback()">Refresh</button>
-        <button class="dark" onclick="Logout()">Logout</button>
+    <button class="primary" onclick="LoadFeedback(true)">Refresh</button>
+    <button class="dark" onclick="Logout()">Logout</button>
 
-        <div id="msg"></div>
-        <div id="tableHolder"></div>
+    <div id="msg"></div>
+
+    <div id="tableHolder"></div>
+
+    <div id="detailBox">
+        <div class="detailRow"><span class="detailLabel">ID:</span> <span id="d_id"></span></div>
+        <div class="detailRow"><span class="detailLabel">Date:</span> <span id="d_date"></span></div>
+        <div class="detailRow"><span class="detailLabel">Department:</span> <span id="d_dept"></span></div>
+        <div class="detailRow"><span class="detailLabel">Category:</span> <span id="d_category"></span></div>
+        <div class="detailRow"><span class="detailLabel">Topic:</span> <span id="d_topic"></span></div>
+        <div class="detailRow"><span class="detailLabel">Subject:</span> <span id="d_subject"></span></div>
+        <div class="detailRow"><span class="detailLabel">Upvotes:</span> <span id="d_upvotes"></span></div>
+        <div class="detailRow"><span class="detailLabel">Status:</span> <span id="d_status"></span></div>
+        <div id="detailText"></div>
     </div>
+
+</div>
 </body>
 </html>
+
