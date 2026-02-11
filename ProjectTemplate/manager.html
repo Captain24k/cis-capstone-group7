@@ -1,106 +1,145 @@
 <!DOCTYPE html>
 <html>
 <head>
-	<meta charset="utf-8" />
-	<title>Manager Dashboard</title>
+    <meta charset="utf-8" />
+    <title>Manager Dashboard</title>
 
-	<style>
-		body { font-family: Arial; background:#f4f4f4; margin:0; }
-		.box { width:720px; margin:40px auto; background:#fff; padding:20px; border:1px solid #ddd; border-radius:6px; }
-		h2 { margin-top:0; }
-		button { margin-top:10px; padding:8px 12px; border:none; border-radius:4px; cursor:pointer; margin-right:8px; }
-		.primary { background:#2d7ef7; color:#fff; }
-		.dark { background:#444; color:#fff; }
-		.note { font-size:12px; color:#555; margin-bottom:10px; }
-		#msg { margin-top:12px; min-height:18px; font-size:14px; }
+    <style>
+        body {
+            font-family: Arial;
+            background: #f4f4f4;
+            margin: 0;
+        }
 
-		table { border-collapse:collapse; width:100%; margin-top:15px; }
-		th, td { border:1px solid #ccc; padding:8px; text-align:left; font-size:13px; }
-		th { background:#eee; }
-	</style>
+        .box {
+            width: 720px;
+            margin: 40px auto;
+            background: #fff;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+        }
 
-	<script>
-	
-		//  only allow manager role
-		
-		window.onload = function () {
-			var role = localStorage.getItem("role");
-			if (role !== "manager") {
-				// not logged in as manager -> back to login
-				window.location.href = "index.html";
-				return;
-			}
-			LoadFeedbackForManager();
-		};
+        button {
+            margin-top: 10px;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 8px;
+        }
 
-		// LOGOUT
-		
-		function Logout() {
-			localStorage.removeItem("role");
-			window.location.href = "index.html";
-		}
+        .primary {
+            background: #2d7ef7;
+            color: #fff;
+        }
 
-		
-		// LOAD FEEDBACK (from localStorage)
-		
-		function LoadFeedbackForManager() {
+        .dark {
+            background: #444;
+            color: #fff;
+        }
 
-			var list = JSON.parse(localStorage.getItem("feedbackList") || "[]");
-			var msg = document.getElementById("msg");
-			var holder = document.getElementById("tableHolder");
+        #msg {
+            margin-top: 12px;
+            font-size: 14px;
+        }
 
-			holder.innerHTML = "";
-			msg.innerText = "";
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 15px;
+        }
 
-			if (list.length === 0) {
-				msg.style.color = "red";
-				msg.innerText = "No feedback found yet.";
-				return;
-			}
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+            font-size: 13px;
+        }
 
-			var html = "<table>";
-			html += "<tr><th>Date</th><th>Department</th><th>Category</th><th>Subject</th><th>Feedback</th></tr>";
+        th {
+            background: #eee;
+        }
+    </style>
 
-			for (var i = 0; i < list.length; i++) {
-				html += "<tr>";
-				html += "<td>" + (list[i].date || "") + "</td>";
-				html += "<td>" + (list[i].department || "") + "</td>";
-				html += "<td>" + (list[i].category || "") + "</td>";
-				html += "<td>" + (list[i].subject || "") + "</td>";
-				html += "<td>" + (list[i].feedbackText || "") + "</td>";
-				html += "</tr>";
-			}
+    <script>
+window.onload = function () {
+    var role = localStorage.getItem("role");
+    if (role !== "manager") {
+        window.location.href = "index.html";
+        return;
+    }
+    LoadFeedback();
+};
 
-			html += "</table>";
+function Logout() {
+    localStorage.removeItem("role");
+    window.location.href = "index.html";
+}
 
-			holder.innerHTML = html;
-			msg.style.color = "green";
-			msg.innerText = "Loaded " + list.length + " feedback item(s).";
-		}
+function LoadFeedback() {
 
-		
-		// CLEAR ALL FEEDBACK
-		
-		function ClearAllFeedback() {
-			localStorage.removeItem("feedbackList");
-			document.getElementById("tableHolder").innerHTML = "";
-			document.getElementById("msg").style.color = "green";
-			document.getElementById("msg").innerText = "All feedback cleared.";
-		}
-	</script>
+    fetch("http://localhost:50287/ProjectServices.asmx/GetFeedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" }
+    })
+    .then(res => res.text())
+    .then(text => {
+
+        // Extract JSON from XML wrapper
+        var json = text.substring(text.indexOf("["));
+        var data = JSON.parse(json);
+
+        var holder = document.getElementById("tableHolder");
+        var msg = document.getElementById("msg");
+
+        holder.innerHTML = "";
+
+        if (data.length === 0) {
+            msg.style.color = "red";
+            msg.innerText = "No feedback found.";
+            return;
+        }
+
+        var html = "<table>";
+        html += "<tr><th>ID</th><th>Date</th><th>Department</th><th>Category</th><th>Subject</th><th>Feedback</th></tr>";
+
+        for (var i = 0; i < data.length; i++) {
+            html += "<tr>";
+            html += "<td>" + data[i].id + "</td>";
+            html += "<td>" + data[i].date + "</td>";
+            html += "<td>" + data[i].department + "</td>";
+            html += "<td>" + data[i].category + "</td>";
+            html += "<td>" + data[i].subject + "</td>";
+            html += "<td>" + data[i].feedbackText + "</td>";
+            html += "</tr>";
+        }
+
+        html += "</table>";
+
+        holder.innerHTML = html;
+        msg.style.color = "green";
+        msg.innerText = "Loaded " + data.length + " item(s).";
+
+    })
+    .catch(() => {
+        document.getElementById("msg").innerText = "Error loading data.";
+    });
+}
+    </script>
+
 </head>
 
 <body>
-	<div class="box">
-		<h2>Manager Dashboard</h2>
-		<p class="note">manger dash board AH localStorage</p>
+    <div class="box">
+        <h2>Manager Dashboard</h2>
 
-		<button class="primary" onclick="LoadFeedbackForManager()">Refresh</button>
-		<button class="dark" onclick="ClearAllFeedback()">Clear All</button>
-		<button class="dark" onclick="Logout()">Logout</button>
+        <button class="primary" onclick="LoadFeedback()">Refresh</button>
+        <button class="dark" onclick="Logout()">Logout</button>
 
-		<div id="msg"></div>
-		<div id="tableHolder"></div>
-	</div>
+        <div id="msg"></div>
+        <div id="tableHolder"></div>
+
+    </div>
 </body>
 </html>

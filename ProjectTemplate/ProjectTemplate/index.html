@@ -1,248 +1,64 @@
 <!DOCTYPE html>
 <html>
-
 <head>
-	<meta charset="utf-8" />
-	<title>Login & Anonymous Feedback</title>
+    <meta charset="utf-8" />
+    <title>Login</title>
 
-	<!--DO NOT FORGET THIS SCRIPT TAG SO YOU CAN USE JQUERY!!!!! -->
-	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+    <style>
+        body {
+            font-family: Arial;
+            background: #f4f4f4;
+            margin: 0;
+        }
 
-	<!--YOUR OWN JAVASCRIPT CAN GO RIGHT HERE-->
-	<script type="text/javascript">
+        .box {
+            width: 420px;
+            margin: 120px auto;
+            background: #fff;
+            padding: 25px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            text-align: center;
+        }
 
-		////////////////////////////////////////////////////////////////////////
-		// LOGIN FUNCTION user abcd pass 1234
-		////////////////////////////////////////////////////////////////////////
-		function LoginHandler() {
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px;
+        }
 
-			$("#loginMsg").text("");
+        .primary {
+            background: #2d7ef7;
+            color: #fff;
+        }
 
-			var email = $("#txtEmail").val();
-			var password = $("#txtPassword").val();
+        .dark {
+            background: #444;
+            color: #fff;
+        }
+    </style>
 
-			if (email == "" || password == "") {
-				$("#loginMsg").css("color", "red");
-				$("#loginMsg").text("Please enter email and password.");
-				return;
-			}
+    <script>
+function LoginAsEmployee() {
+    localStorage.setItem("role", "employee");
+    window.location.href = "employee.html";
+}
 
-
-			var correctEmail = "abcd";
-			var correctPassword = "1234";
-
-			if (email == correctEmail && password == correctPassword) {
-
-				$("#loginMsg").css("color", "green");
-				$("#loginMsg").text("Login successful.");
-
-				// hide login, show feedback
-				$("#loginSection").hide();
-				$("#feedbackSection").show();
-			}
-			else {
-				$("#loginMsg").css("color", "red");
-				$("#loginMsg").text("Invalid email or password.");
-			}
-		}
-		////////////////////////////////////////////////////////////////////////
-		// END LOGIN FUNCTION
-		////////////////////////////////////////////////////////////////////////
-
-
-		////////////////////////////////////////////////////////////////////////
-		//  TEST CONNECTION FUNCTION 
-		////////////////////////////////////////////////////////////////////////
-		function TestButtonHandler() {
-			var webMethod = "ProjectServices.asmx/TestConnection";
-			var parameters = "{}";
-
-			$.ajax({
-				type: "POST",
-				url: webMethod,
-				data: parameters,
-				contentType: "application/json; charset=utf-8",
-				dataType: "json",
-				success: function (msg) {
-					alert(msg.d);
-				},
-				error: function (e) {
-					alert("this code will only execute if javascript is unable to access the webservice");
-				}
-			});
-		}
-		////////////////////////////////////////////////////////////////////////
-		// END TEST CONNECTION
-		////////////////////////////////////////////////////////////////////////
-
-
-		////////////////////////////////////////////////////////////////////////
-		// ANONYMOUS FEEDBACK 
-		////////////////////////////////////////////////////////////////////////
-		function SubmitFeedbackHandler() {
-
-			$("#feedbackMsg").text("");
-
-			var department = $("#ddlDepartment").val();
-			var category = $("#ddlCategory").val();
-			var subject = $("#txtSubject").val();
-			var feedbackText = $("#txtFeedback").val();
-
-			if (department == "" || category == "" || subject == "" || feedbackText == "") {
-				$("#feedbackMsg").css("color", "red");
-				$("#feedbackMsg").text("Please fill out all fields.");
-				return;
-			}
-
-			$("#btnSubmit").prop("disabled", true);
-
-			$.ajax({
-				type: "POST",
-				url: "ProjectServices.asmx/SubmitAnonymousFeedback",
-				data: JSON.stringify({
-					department: department,
-					category: category,
-					subject: subject,
-					feedbackText: feedbackText
-				}),
-				contentType: "application/json; charset=utf-8",
-				dataType: "json",
-				success: function (msg) {
-
-					$("#feedbackMsg").css("color", "green");
-					$("#feedbackMsg").text("Feedback submitted successfully.");
-
-					$("#ddlDepartment").val("");
-					$("#ddlCategory").val("");
-					$("#txtSubject").val("");
-					$("#txtFeedback").val("");
-				},
-				error: function () {
-					$("#feedbackMsg").css("color", "red");
-					$("#feedbackMsg").text("Error submitting feedback.");
-				},
-				complete: function () {
-					$("#btnSubmit").prop("disabled", false);
-				}
-			});
-		}
-		////////////////////////////////////////////////////////////////////////
-		// END FEEDBACK SUBMISSION
-		////////////////////////////////////////////////////////////////////////
-
-	</script>
-	<!--END OF YOUR OWN JAVASCRIPT-->
-
-	<!--AND YOUR OWN CSS CAN GO HERE AS WELL-->
-	<style>
-		body {
-			font-family: Arial;
-			background: #f4f4f4;
-		}
-
-		.box {
-			width: 520px;
-			margin: 40px auto;
-			background: white;
-			padding: 20px;
-			border: 1px solid #ddd;
-			border-radius: 6px;
-		}
-
-		label {
-			display: block;
-			margin-top: 12px;
-			font-weight: bold;
-		}
-
-		input,
-		select,
-		textarea {
-			width: 100%;
-			padding: 8px;
-			margin-top: 6px;
-			border: 1px solid #bbb;
-			border-radius: 4px;
-		}
-
-		textarea {
-			height: 120px;
-		}
-
-		button {
-			margin-top: 15px;
-			padding: 8px 12px;
-			border: none;
-			border-radius: 4px;
-			cursor: pointer;
-			background: #2d7ef7;
-			color: white;
-		}
-
-		#feedbackSection {
-			display: none;
-		}
-
-		.msg {
-			margin-top: 10px;
-			min-height: 18px;
-			font-size: 14px;
-		}
-	</style>
-	<!--END OF YOUR OWN CSS-->
+function LoginAsManager() {
+    localStorage.setItem("role", "manager");
+    window.location.href = "manager.html";
+}
+    </script>
 
 </head>
 
 <body>
-
-	<!-- LOGIN SECTION -->
-	<div class="box" id="loginSection">
-		<h2>Login</h2>
-
-		<label>Email</label>
-		<input id="txtEmail" type="text" />
-
-		<label>Password</label>
-		<input id="txtPassword" type="password" />
-
-		<button onclick="LoginHandler()">Login</button>
-
-		<div id="loginMsg" class="msg"></div>
-	</div>
-
-	<!-- FEEDBACK SECTION -->
-	<div class="box" id="feedbackSection">
-		<h2>Anonymous Feedback</h2>
-
-		<label>Department</label>
-		<select id="ddlDepartment">
-			<option value="">Select Department</option>
-			<option value="HR">HR</option>
-			<option value="IT">IT</option>
-			<option value="Finance">Finance</option>
-			<option value="Operations">Operations</option>
-		</select>
-
-		<label>Category</label>
-		<select id="ddlCategory">
-			<option value="">Select Category</option>
-			<option value="Safety">Safety</option>
-			<option value="Management">Management</option>
-			<option value="Work Environment">Work Environment</option>
-		</select>
-
-		<label>Subject</label>
-		<input id="txtSubject" type="text" />
-
-		<label>Feedback</label>
-		<textarea id="txtFeedback"></textarea>
-
-		<button id="btnSubmit" onclick="SubmitFeedbackHandler()">Submit Feedback</button>
-		<button onclick="TestButtonHandler()">Test Connection</button>
-
-		<div id="feedbackMsg" class="msg"></div>
-	</div>
-
+    <div class="box">
+        <h2>Login</h2>
+        <button class="primary" onclick="LoginAsEmployee()">Employee</button>
+        <button class="dark" onclick="LoginAsManager()">Manager</button>
+    </div>
 </body>
-
 </html>

@@ -1,66 +1,124 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Web;
 using System.Web.Services;
-using MySql.Data;
 using MySql.Data.MySqlClient;
-using System.Data;
 
 namespace ProjectTemplate
 {
-	[WebService(Namespace = "http://tempuri.org/")]
-	[WebServiceBinding(ConformsTo = WsiProfiles.BasicProfile1_1)]
-	[System.ComponentModel.ToolboxItem(false)]
-	[System.Web.Script.Services.ScriptService]
+    [WebService(Namespace = "http://tempuri.org/")]
+    [WebServiceBinding(ConformsTo = WsiProfiles.BasicProfile1_1)]
+    [System.ComponentModel.ToolboxItem(false)]
+    [System.Web.Script.Services.ScriptService]
 
-	public class ProjectServices : System.Web.Services.WebService
-	{
-		////////////////////////////////////////////////////////////////////////
-		///replace the values of these variables with your database credentials
-		////////////////////////////////////////////////////////////////////////
-		private string dbID = "cis440template";
-		private string dbPass = "!!Cis440";
-		private string dbName = "cis440template";
-		////////////////////////////////////////////////////////////////////////
-		
-		////////////////////////////////////////////////////////////////////////
-		///call this method anywhere that you need the connection string!
-		////////////////////////////////////////////////////////////////////////
-		private string getConString() {
-			return "SERVER=107.180.1.16; PORT=3306; DATABASE=" + dbName+"; UID=" + dbID + "; PASSWORD=" + dbPass;
-		}
-		////////////////////////////////////////////////////////////////////////
+    public class ProjectServices : System.Web.Services.WebService
+    {
+        // DATABASE CREDENTIALS
+        private string dbID = "cis440Spring2026team7";
+        private string dbPass = "cis440Spring2026team7";
+        private string dbName = "cis440Spring2026team7";
 
+        private string getConString()
+        {
+            return "SERVER=107.180.1.16; PORT=3306; DATABASE=" +
+                   dbName + "; UID=" + dbID + "; PASSWORD=" + dbPass;
+        }
 
+        // TEST CONNECTION
+        [WebMethod(EnableSession = true)]
+        public string TestConnection()
+        {
+            try
+            {
+                using (MySqlConnection con = new MySqlConnection(getConString()))
+                {
+                    con.Open();
+                }
+                return "Success!";
+            }
+            catch (Exception e)
+            {
+                return e.Message;
+            }
+        }
 
-		/////////////////////////////////////////////////////////////////////////
-		//don't forget to include this decoration above each method that you want
-		//to be exposed as a web service!
-		[WebMethod(EnableSession = true)]
-		/////////////////////////////////////////////////////////////////////////
-		public string TestConnection()
-		{
-			try
-			{
-				string testQuery = "select * from test";
+        // SAVE FEEDBACK
+        [WebMethod(EnableSession = true)]
+        public string SaveFeedback(string department,
+                                   string category,
+                                   string subject,
+                                   string feedbackText)
+        {
+            try
+            {
+                using (MySqlConnection con = new MySqlConnection(getConString()))
+                {
+                    string sql = @"INSERT INTO feedback
+                                   (department, category, subject, feedback_text)
+                                   VALUES (@d, @c, @s, @f)";
 
-				////////////////////////////////////////////////////////////////////////
-				///here's an example of using the getConString method!
-				////////////////////////////////////////////////////////////////////////
-				MySqlConnection con = new MySqlConnection(getConString());
-				////////////////////////////////////////////////////////////////////////
+                    MySqlCommand cmd = new MySqlCommand(sql, con);
+                    cmd.Parameters.AddWithValue("@d", department);
+                    cmd.Parameters.AddWithValue("@c", category);
+                    cmd.Parameters.AddWithValue("@s", subject);
+                    cmd.Parameters.AddWithValue("@f", feedbackText);
 
-				MySqlCommand cmd = new MySqlCommand(testQuery, con);
-				MySqlDataAdapter adapter = new MySqlDataAdapter(cmd);
-				DataTable table = new DataTable();
-				adapter.Fill(table);
-				return "Success!";
-			}
-			catch (Exception e)
-			{
-				return "Something went wrong, please check your credentials and db name and try again.  Error: "+e.Message;
-			}
-		}
-	}
+                    con.Open();
+                    cmd.ExecuteNonQuery();
+                }
+
+                return "success";
+            }
+            catch (Exception e)
+            {
+                return e.Message;
+            }
+        }
+
+        // GET FEEDBACK
+        [WebMethod(EnableSession = true)]
+        public string GetFeedback()
+        {
+            try
+            {
+                using (MySqlConnection con = new MySqlConnection(getConString()))
+                {
+                    string sql = @"SELECT feedback_id,
+                                          created_at,
+                                          department,
+                                          category,
+                                          subject,
+                                          feedback_text
+                                   FROM feedback
+                                   ORDER BY feedback_id DESC";
+
+                    MySqlCommand cmd = new MySqlCommand(sql, con);
+                    con.Open();
+                    MySqlDataReader reader = cmd.ExecuteReader();
+
+                    string result = "[";
+
+                    while (reader.Read())
+                    {
+                        result += "{";
+                        result += "\"id\":\"" + reader["feedback_id"] + "\",";
+                        result += "\"date\":\"" + reader["created_at"] + "\",";
+                        result += "\"department\":\"" + reader["department"] + "\",";
+                        result += "\"category\":\"" + reader["category"] + "\",";
+                        result += "\"subject\":\"" + reader["subject"] + "\",";
+                        result += "\"feedbackText\":\"" + reader["feedback_text"] + "\"";
+                        result += "},";
+                    }
+
+                    if (result.EndsWith(","))
+                        result = result.Substring(0, result.Length - 1);
+
+                    result += "]";
+                    return result;
+                }
+            }
+            catch (Exception e)
+            {
+                return e.Message;
+            }
+        }
+    }
 }
