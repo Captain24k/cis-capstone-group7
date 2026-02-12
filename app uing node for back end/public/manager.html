@@ -1,0 +1,135 @@
+<h2>Manager Page </h2><!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8" />
+	<title>Manager Dashboard</title>
+
+	<style>
+		body { font-family: Arial; background:#f4f4f4; margin:0; }
+		.box { width:720px; margin:40px auto; background:#fff; padding:20px; border:1px solid #ddd; border-radius:6px; }
+		h2 { margin-top:0; }
+		button { margin-top:10px; padding:8px 12px; border:none; border-radius:4px; cursor:pointer; margin-right:8px; }
+		.primary { background:#2d7ef7; color:#fff; }
+		.dark { background:#444; color:#fff; }
+		.note { font-size:12px; color:#555; margin-bottom:10px; }
+		#msg { margin-top:12px; min-height:18px; font-size:14px; }
+
+		table { border-collapse:collapse; width:100%; margin-top:15px; }
+		th, td { border:1px solid #ccc; padding:8px; text-align:left; font-size:13px; }
+		th { background:#eee; }
+	</style>
+
+	<script>
+		window.onload = function () {
+			var role = localStorage.getItem("role");
+			var token = localStorage.getItem("token");
+
+			if (!token || role !== "manager") {
+				window.location.href = "index.html";
+				return;
+			}
+
+			LoadFeedbackForManager();
+		};
+
+		function Logout() {
+			localStorage.removeItem("role");
+			localStorage.removeItem("token");
+			window.location.href = "index.html";
+		}
+
+		function LoadFeedbackForManager() {
+			var msg = document.getElementById("msg");
+			var holder = document.getElementById("tableHolder");
+			var token = localStorage.getItem("token");
+
+			holder.innerHTML = "";
+			msg.innerText = "";
+
+			fetch("/api/feedback", {
+				method: "GET",
+				headers: { "Authorization": "Bearer " + token }
+			})
+			.then(r => r.json())
+			.then(data => {
+				if (!data.ok) {
+					msg.style.color = "red";
+					msg.innerText = data.message || "Load failed.";
+					return;
+				}
+
+				var list = data.data || [];
+				if (list.length === 0) {
+					msg.style.color = "red";
+					msg.innerText = "No feedback found yet.";
+					return;
+				}
+
+				var html = "<table>";
+				html += "<tr><th>Date</th><th>Department</th><th>Category</th><th>Subject</th><th>Feedback</th></tr>";
+
+				for (var i = 0; i < list.length; i++) {
+					html += "<tr>";
+					html += "<td>" + (list[i].created_at || "") + "</td>";
+					html += "<td>" + (list[i].department || "") + "</td>";
+					html += "<td>" + (list[i].category || "") + "</td>";
+					html += "<td>" + (list[i].subject || "") + "</td>";
+					html += "<td>" + (list[i].feedback_text || "") + "</td>";
+					html += "</tr>";
+				}
+
+				html += "</table>";
+				holder.innerHTML = html;
+
+				msg.style.color = "green";
+				msg.innerText = "Loaded " + list.length + " feedback item(s).";
+			})
+			.catch(() => {
+				msg.style.color = "red";
+				msg.innerText = "Server error. Make sure Node.js server is running.";
+			});
+		}
+
+		function ClearAllFeedback() {
+			var msg = document.getElementById("msg");
+			var holder = document.getElementById("tableHolder");
+			var token = localStorage.getItem("token");
+
+			fetch("/api/feedback", {
+				method: "DELETE",
+				headers: { "Authorization": "Bearer " + token }
+			})
+			.then(r => r.json())
+			.then(data => {
+				if (!data.ok) {
+					msg.style.color = "red";
+					msg.innerText = data.message || "Clear failed.";
+					return;
+				}
+
+				holder.innerHTML = "";
+				msg.style.color = "green";
+				msg.innerText = data.message || "All feedback cleared.";
+			})
+			.catch(() => {
+				msg.style.color = "red";
+				msg.innerText = "Server error. Make sure Node.js server is running.";
+			});
+		}
+	</script>
+</head>
+
+<body>
+	<div class="box">
+		<h2></h2>
+		<p class="note"></p>
+
+		<button class="primary" onclick="LoadFeedbackForManager()">Refresh</button>
+		<button class="dark" onclick="ClearAllFeedback()">Clear All</button>
+		<button class="dark" onclick="Logout()">Logout</button>
+
+		<div id="msg"></div>
+		<div id="tableHolder"></div>
+	</div>
+</body>
+</html>
