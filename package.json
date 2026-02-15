@@ -1,0 +1,14 @@
+{
+  "name": "anonymous-feedback-app",
+  "version": "1.0.0",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.4",
+    "express": "^4.19.2",
+    "mysql2": "^3.11.0"
+  }
+}

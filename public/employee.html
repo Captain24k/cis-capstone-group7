@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8" />
+	<title>Anonymous Feedback (Employee)</title>
+
+	<style>
+		body { font-family: Arial; background:#f4f4f4; margin:0; }
+		.box { width:860px; margin:40px auto; background:#fff; padding:20px; border:1px solid #ddd; border-radius:6px; }
+		h2 { margin-top:0; }
+		label { display:block; margin-top:12px; font-weight:bold; }
+		select, input, textarea { width:100%; box-sizing:border-box; padding:8px; margin-top:6px; border:1px solid #bbb; border-radius:4px; font-size:14px; }
+		textarea { height:120px; resize:vertical; }
+		button { margin-top:12px; padding:8px 12px; border:none; border-radius:4px; cursor:pointer; margin-right:8px; }
+		.primary { background:#2d7ef7; color:#fff; }
+		.dark { background:#444; color:#fff; }
+		.light { background:#eee; color:#111; }
+		.note { font-size:12px; color:#555; margin-bottom:10px; }
+		#msg { margin-top:12px; min-height:18px; font-size:14px; }
+
+		/* Tabs */
+		.tabs { display:flex; gap:8px; margin:10px 0 12px 0; }
+		.tab { padding:8px 12px; border-radius:4px; border:1px solid #ccc; background:#fafafa; cursor:pointer; }
+		.tab.active { background:#2d7ef7; border-color:#2d7ef7; color:#fff; }
+
+		/* Browse */
+		.filters { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-top:10px; }
+		.filters > div { flex:1; min-width:180px; }
+		.small { font-size:12px; color:#666; margin-top:4px; }
+
+		.feedbackList { margin-top:12px; }
+		.card { border:1px solid #ddd; border-radius:6px; padding:12px; background:#fff; margin-bottom:10px; }
+		.cardTop { display:flex; gap:10px; justify-content:space-between; align-items:flex-start; }
+		.meta { font-size:12px; color:#666; }
+		.subject { font-weight:bold; margin:4px 0 6px 0; }
+		.text { white-space:pre-wrap; font-size:14px; color:#111; }
+		.actions { display:flex; gap:8px; align-items:center; }
+		.pill { font-size:12px; background:#f2f2f2; border:1px solid #ddd; padding:4px 8px; border-radius:999px; }
+	</style>
+
+	<script>
+		var ALL_FEEDBACK = [];
+
+		window.onload = function () {
+			var role = localStorage.getItem("role");
+			var token = localStorage.getItem("token");
+
+			if (!token || role !== "emp") {
+				window.location.href = "index.html";
+				return;
+			}
+
+			ShowTab("submit");
+			LoadFeedbackForEmployees();
+		};
+
+		function ShowTab(which) {
+			document.getElementById("tabSubmit").classList.remove("active");
+			document.getElementById("tabBrowse").classList.remove("active");
+			document.getElementById("panelSubmit").style.display = "none";
+			document.getElementById("panelBrowse").style.display = "none";
+
+			if (which === "browse") {
+				document.getElementById("tabBrowse").classList.add("active");
+				document.getElementById("panelBrowse").style.display = "block";
+			} else {
+				document.getElementById("tabSubmit").classList.add("active");
+				document.getElementById("panelSubmit").style.display = "block";
+			}
+		}
+
+		function Logout() {
+			localStorage.removeItem("role");
+			localStorage.removeItem("token");
+			window.location.href = "index.html";
+		}
+
+		function SubmitFeedbackHandler() {
+			var department = document.getElementById("ddlDepartment").value;
+			var category = document.getElementById("ddlCategory").value;
+			var subject = document.getElementById("txtSubject").value.trim();
+			var feedbackText = document.getElementById("txtFeedback").value.trim();
+
+			var msg = document.getElementById("msg");
+			msg.innerText = "";
+
+			if (department === "" || category === "" || subject === "" || feedbackText === "") {
+				msg.style.color = "red";
+				msg.innerText = "Please fill out all fields.";
+				return;
+			}
+
+			var token = localStorage.getItem("token");
+
+			fetch("/api/feedback", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer " + token
+				},
+				body: JSON.stringify({
+					department: department,
+					category: category,
+					subject: subject,
+					feedback_text: feedbackText
+				})
+			})
+			.then(r => r.json())
+			.then(data => {
+				if (!data.ok) {
+					msg.style.color = "red";
+					msg.innerText = data.message || "Submit failed.";
+					return;
+				}
+
+				msg.style.color = "green";
+				msg.innerText = data.message;
+
+				document.getElementById("ddlDepartment").value = "";
+				document.getElementById("ddlCategory").value = "";
+				document.getElementById("txtSubject").value = "";
+				document.getElementById("txtFeedback").value = "";
+
+				// Refresh browse list after submitting
+				LoadFeedbackForEmployees();
+			})
+			.catch(() => {
+				msg.style.color = "red";
+				msg.innerText = "Server error. Make sure Node.js server is running.";
+			});
+		}
+
+		function LoadFeedbackForEmployees() {
+			var bmsg = document.getElementById("browseMsg");
+			var token = localStorage.getItem("token");
+			bmsg.innerText = "";
+
+			fetch("/api/feedback/employee", {
+				method: "GET",
+				headers: { "Authorization": "Bearer " + token }
+			})
+			.then(r => r.json())
+			.then(data => {
+				if (!data.ok) {
+					bmsg.style.color = "red";
+					bmsg.innerText = data.message || "Load failed.";
+					return;
+				}
+
+				ALL_FEEDBACK = data.data || [];
+				ApplyFiltersAndRender();
+			})
+			.catch(() => {
+				bmsg.style.color = "red";
+				bmsg.innerText = "Server error. Make sure Node.js server is running.";
+			});
+		}
+
+		function ApplyFiltersAndRender() {
+			var dept = document.getElementById("filterDept").value;
+			var cat = document.getElementById("filterCat").value;
+			var q = document.getElementById("filterSearch").value.trim().toLowerCase();
+			var sort = document.getElementById("sortBy").value;
+
+			var list = (ALL_FEEDBACK || []).slice(0);
+
+			if (dept !== "") list = list.filter(x => (x.department || "") === dept);
+			if (cat !== "") list = list.filter(x => (x.category || "") === cat);
+
+			if (q !== "") {
+				list = list.filter(x => {
+					var s = ((x.subject || "") + " " + (x.feedback_text || "")).toLowerCase();
+					return s.indexOf(q) >= 0;
+				});
+			}
+
+			if (sort === "upvotes") {
+				list.sort((a,b) => (b.upvotes||0) - (a.upvotes||0));
+			} else if (sort === "oldest") {
+				list.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+			} else {
+				// newest
+				list.sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+			}
+
+			RenderFeedback(list);
+		}
+
+		function RenderFeedback(list) {
+			var holder = document.getElementById("feedbackHolder");
+			var bmsg = document.getElementById("browseMsg");
+
+			holder.innerHTML = "";
+
+			if (!list || list.length === 0) {
+				bmsg.style.color = "#444";
+				bmsg.innerText = "No feedback matches your filters.";
+				return;
+			}
+
+			bmsg.style.color = "green";
+			bmsg.innerText = "Showing " + list.length + " item(s).";
+
+			var html = "";
+
+			for (var i = 0; i < list.length; i++) {
+				var item = list[i];
+				var id = item.feedback_id;
+				var up = item.upvotes || 0;
+
+				html += '<div class="card">';
+				html += '  <div class="cardTop">';
+				html += '    <div>';
+				html += '      <div class="meta">' + (item.created_at || "") + ' • ' + (item.department || "") + ' • ' + (item.category || "") + '</div>';
+				html += '      <div class="subject">' + EscapeHtml(item.subject || "") + '</div>';
+				html += '    </div>';
+				html += '    <div class="actions">';
+				html += '      <span class="pill" id="upCount_' + id + '">' + up + ' upvote(s)</span>';
+				html += '      <button class="primary" onclick="Upvote(' + id + ')">Upvote</button>';
+				html += '    </div>';
+				html += '  </div>';
+				html += '  <div class="text">' + EscapeHtml(item.feedback_text || "") + '</div>';
+				html += '</div>';
+			}
+
+			holder.innerHTML = html;
+		}
+
+		function Upvote(feedbackId) {
+			var token = localStorage.getItem("token");
+			fetch("/api/feedback/" + feedbackId + "/upvote", {
+				method: "POST",
+				headers: { "Authorization": "Bearer " + token }
+			})
+			.then(r => r.json())
+			.then(data => {
+				if (!data.ok) return;
+
+				// Update local cache
+				for (var i = 0; i < ALL_FEEDBACK.length; i++) {
+					if (ALL_FEEDBACK[i].feedback_id === feedbackId) {
+						ALL_FEEDBACK[i].upvotes = data.upvotes;
+						break;
+					}
+				}
+
+				var pill = document.getElementById("upCount_" + feedbackId);
+				if (pill) pill.innerText = data.upvotes + " upvote(s)";
+
+				// If currently sorted by upvotes, re-render so order updates
+				if (document.getElementById("sortBy").value === "upvotes") {
+					ApplyFiltersAndRender();
+				}
+			})
+			.catch(() => { /* ignore */ });
+		}
+
+		function EscapeHtml(s) {
+			return String(s)
+				.replace(/&/g, "&amp;")
+				.replace(/</g, "&lt;")
+				.replace(/>/g, "&gt;")
+				.replace(/"/g, "&quot;")
+				.replace(/'/g, "&#039;");
+		}
+	</script>
+</head>
+
+<body>
+	<div class="box">
+		<h2>Anonymous Feedback (Employee)</h2>
+		<p class="note">Submit feedback anonymously, or browse what others have shared.</p>
+
+		<div class="tabs">
+			<div id="tabSubmit" class="tab" onclick="ShowTab('submit')">Submit Feedback</div>
+			<div id="tabBrowse" class="tab" onclick="ShowTab('browse')">Browse Feedback</div>
+			<div style="flex:1"></div>
+			<button class="dark" onclick="Logout()">Logout</button>
+		</div>
+
+		<!-- SUBMIT PANEL -->
+		<div id="panelSubmit">
+			<label for="ddlDepartment">Department</label>
+			<select id="ddlDepartment">
+				<option value="">-- Select Department --</option>
+				<option value="HR">HR</option>
+				<option value="IT">IT</option>
+				<option value="Finance">Finance</option>
+				<option value="Operations">Operations</option>
+				<option value="Other">Other</option>
+			</select>
+
+			<label for="ddlCategory">Category</label>
+			<select id="ddlCategory">
+				<option value="">-- Select Category --</option>
+				<option value="Safety">Safety</option>
+				<option value="Work Environment">Work Environment</option>
+				<option value="Management">Management</option>
+				<option value="Pay/Benefits">Pay/Benefits</option>
+				<option value="Other">Other</option>
+			</select>
+
+			<label for="txtSubject">Subject</label>
+			<input id="txtSubject" type="text" placeholder="Short subject..." />
+
+			<label for="txtFeedback">Feedback</label>
+			<textarea id="txtFeedback" placeholder="Write your feedback..."></textarea>
+
+			<button class="primary" onclick="SubmitFeedbackHandler()">Submit</button>
+
+			<div id="msg"></div>
+		</div>
+
+		<!-- BROWSE PANEL -->
+		<div id="panelBrowse" style="display:none;">
+			<div class="filters">
+				<div>
+					<label for="filterDept">Filter: Department</label>
+					<select id="filterDept" onchange="ApplyFiltersAndRender()">
+						<option value="">All</option>
+						<option value="HR">HR</option>
+						<option value="IT">IT</option>
+						<option value="Finance">Finance</option>
+						<option value="Operations">Operations</option>
+						<option value="Other">Other</option>
+					</select>
+				</div>
+
+				<div>
+					<label for="filterCat">Filter: Category</label>
+					<select id="filterCat" onchange="ApplyFiltersAndRender()">
+						<option value="">All</option>
+						<option value="Safety">Safety</option>
+						<option value="Work Environment">Work Environment</option>
+						<option value="Management">Management</option>
+						<option value="Pay/Benefits">Pay/Benefits</option>
+						<option value="Other">Other</option>
+					</select>
+				</div>
+
+				<div>
+					<label for="sortBy">Sort By</label>
+					<select id="sortBy" onchange="ApplyFiltersAndRender()">
+						<option value="newest">Newest</option>
+						<option value="oldest">Oldest</option>
+						<option value="upvotes">Most Upvoted</option>
+					</select>
+				</div>
+
+				<div style="flex:2; min-width:240px;">
+					<label for="filterSearch">Search</label>
+					<input id="filterSearch" type="text" placeholder="Search subject/feedback..." oninput="ApplyFiltersAndRender()" />
+					<div class="small">Tip: try keywords like “scheduling”, “pay”, or “management”.</div>
+				</div>
+			</div>
+
+			<button class="light" onclick="LoadFeedbackForEmployees()">Refresh List</button>
+
+			<div id="browseMsg" style="margin-top:10px; min-height:18px; font-size:14px;"></div>
+			<div id="feedbackHolder" class="feedbackList"></div>
+		</div>
+	</div>
+</body>
+</html>

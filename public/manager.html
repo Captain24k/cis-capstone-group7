@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8" />
+	<title>Manager Dashboard</title>
+
+	<style>
+		body { font-family: Arial; background:#f4f4f4; margin:0; }
+		.box { width:860px; margin:40px auto; background:#fff; padding:20px; border:1px solid #ddd; border-radius:6px; }
+		h2 { margin-top:0; }
+		button { margin-top:10px; padding:8px 12px; border:none; border-radius:4px; cursor:pointer; margin-right:8px; }
+		.primary { background:#2d7ef7; color:#fff; }
+		.dark { background:#444; color:#fff; }
+		.note { font-size:12px; color:#555; margin-bottom:10px; }
+		#msg { margin-top:12px; min-height:18px; font-size:14px; }
+
+		.controls { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-top:10px; }
+		.control { display:flex; flex-direction:column; gap:6px; }
+		label { font-size:12px; color:#333; font-weight:bold; }
+		select, input {
+			padding:8px;
+			border:1px solid #bbb;
+			border-radius:4px;
+			font-size:14px;
+			min-width:200px;
+		}
+
+		table { border-collapse:collapse; width:100%; margin-top:15px; }
+		th, td { border:1px solid #ccc; padding:8px; text-align:left; font-size:13px; vertical-align:top; }
+		th { background:#eee; }
+	</style>
+
+	<script>
+		var ALL_FEEDBACK = [];
+
+		window.onload = function () {
+			var role = localStorage.getItem("role");
+			var token = localStorage.getItem("token");
+
+			if (!token || role !== "manager") {
+				window.location.href = "index.html";
+				return;
+			}
+
+			LoadFeedbackForManager();
+		};
+
+		function Logout() {
+			localStorage.removeItem("role");
+			localStorage.removeItem("token");
+			window.location.href = "index.html";
+		}
+
+		function LoadFeedbackForManager() {
+			var msg = document.getElementById("msg");
+			var holder = document.getElementById("tableHolder");
+			var token = localStorage.getItem("token");
+
+			holder.innerHTML = "";
+			msg.innerText = "";
+
+			fetch("/api/feedback", {
+				method: "GET",
+				headers: { "Authorization": "Bearer " + token }
+			})
+			.then(r => r.json())
+			.then(data => {
+				if (!data.ok) {
+					msg.style.color = "red";
+					msg.innerText = data.message || "Load failed.";
+					return;
+				}
+
+				ALL_FEEDBACK = data.data || [];
+
+				if (ALL_FEEDBACK.length === 0) {
+					msg.style.color = "red";
+					msg.innerText = "No feedback found yet.";
+					RenderTable([]); // empty render
+					return;
+				}
+
+				BuildDepartmentFilter(ALL_FEEDBACK);
+				RenderFromControls();
+
+				msg.style.color = "green";
+				msg.innerText = "Loaded " + ALL_FEEDBACK.length + " feedback item(s).";
+			})
+			.catch((e) => {
+				msg.style.color = "red";
+				msg.innerText = "Server error. Make sure Node.js server is running.";
+			});
+		}
+
+		function BuildDepartmentFilter(list) {
+			var ddl = document.getElementById("ddlDepartmentFilter");
+
+			// keep current selection if possible
+			var current = ddl.value || "ALL";
+
+			var depts = {};
+			for (var i = 0; i < list.length; i++) {
+				var d = (list[i].department || "").trim();
+				if (d) depts[d] = true;
+			}
+
+			var keys = Object.keys(depts).sort();
+
+			var html = '<option value="ALL">All Departments</option>';
+			for (var j = 0; j < keys.length; j++) {
+				html += '<option value="' + EscapeHtml(keys[j]) + '">' + EscapeHtml(keys[j]) + '</option>';
+			}
+
+			ddl.innerHTML = html;
+
+			// restore selection if still exists
+			var opts = ddl.options;
+			var found = false;
+			for (var k = 0; k < opts.length; k++) {
+				if (opts[k].value === current) found = true;
+			}
+			ddl.value = found ? current : "ALL";
+		}
+
+		function RenderFromControls() {
+			var dept = document.getElementById("ddlDepartmentFilter").value;
+			var sort = document.getElementById("ddlSort").value;
+
+			var list = ALL_FEEDBACK.slice(0);
+
+			// FILTER by department
+			if (dept !== "ALL") {
+				list = list.filter(function (x) {
+					return String(x.department || "") === dept;
+				});
+			}
+
+			// SORT
+			list.sort(function (a, b) {
+				var av = Number(a.upvotes || 0);
+				var bv = Number(b.upvotes || 0);
+
+				// created_at from DB could be string; compare as Date
+				var ad = new Date(a.created_at || 0).getTime();
+				var bd = new Date(b.created_at || 0).getTime();
+
+				if (sort === "MOST_UPVOTED") {
+					if (bv !== av) return bv - av;
+					return bd - ad; 
+				}
+				if (sort === "NEWEST") return bd - ad;
+				if (sort === "OLDEST") return ad - bd;
+
+				return bd - ad;
+			});
+
+			RenderTable(list);
+
+			var msg = document.getElementById("msg");
+			msg.style.color = "green";
+			msg.innerText = "Showing " + list.length + " of " + ALL_FEEDBACK.length + " report(s).";
+		}
+
+		function RenderTable(list) {
+			var holder = document.getElementById("tableHolder");
+
+			if (!list || list.length === 0) {
+				holder.innerHTML = "";
+				return;
+			}
+
+			var html = "<table>";
+			html += "<tr><th>Date</th><th>Department</th><th>Category</th><th>Subject</th><th>Feedback</th><th>Upvotes</th></tr>";
+
+			for (var i = 0; i < list.length; i++) {
+				html += "<tr>";
+				html += "<td>" + EscapeHtml(String(list[i].created_at || "")) + "</td>";
+				html += "<td>" + EscapeHtml(String(list[i].department || "")) + "</td>";
+				html += "<td>" + EscapeHtml(String(list[i].category || "")) + "</td>";
+				html += "<td>" + EscapeHtml(String(list[i].subject || "")) + "</td>";
+				html += "<td>" + EscapeHtml(String(list[i].feedback_text || "")) + "</td>";
+				html += "<td>" + EscapeHtml(String(list[i].upvotes || 0)) + "</td>";
+				html += "</tr>";
+			}
+
+			html += "</table>";
+			holder.innerHTML = html;
+		}
+
+		function ClearAllFeedback() {
+			var msg = document.getElementById("msg");
+			var holder = document.getElementById("tableHolder");
+			var token = localStorage.getItem("token");
+
+			fetch("/api/feedback", {
+				method: "DELETE",
+				headers: { "Authorization": "Bearer " + token }
+			})
+			.then(r => r.json())
+			.then(data => {
+				if (!data.ok) {
+					msg.style.color = "red";
+					msg.innerText = data.message || "Clear failed.";
+					return;
+				}
+
+				ALL_FEEDBACK = [];
+				holder.innerHTML = "";
+				msg.style.color = "green";
+				msg.innerText = data.message || "All feedback cleared.";
+
+				BuildDepartmentFilter([]);
+			})
+			.catch(() => {
+				msg.style.color = "red";
+				msg.innerText = "Server error. Make sure Node.js server is running.";
+			});
+		}
+
+		function EscapeHtml(s) {
+			return String(s)
+				.replace(/&/g, "&amp;")
+				.replace(/</g, "&lt;")
+				.replace(/>/g, "&gt;")
+				.replace(/"/g, "&quot;")
+				.replace(/'/g, "&#039;");
+		}
+	</script>
+</head>
+
+<body>
+	<div class="box">
+		<h2>Manager Dashboard</h2>
+	
+
+		<div class="controls">
+			<div class="control">
+				<label for="ddlDepartmentFilter">Department Filter</label>
+				<select id="ddlDepartmentFilter" onchange="RenderFromControls()">
+					<option value="ALL">All Departments</option>
+				</select>
+			</div>
+
+			<div class="control">
+				<label for="ddlSort">Sort</label>
+				<select id="ddlSort" onchange="RenderFromControls()">
+					<option value="MOST_UPVOTED">Most Upvoted</option>
+					<option value="NEWEST">Newest</option>
+					<option value="OLDEST">Oldest</option>
+				</select>
+			</div>
+
+			<div class="control">
+				<button class="primary" onclick="LoadFeedbackForManager()">Refresh</button>
+				<button class="dark" onclick="ClearAllFeedback()">Clear All</button>
+				<button class="dark" onclick="Logout()">Logout</button>
+			</div>
+		</div>
+
+		<div id="msg"></div>
+		<div id="tableHolder"></div>
+	</div>
+</body>
+</html>
