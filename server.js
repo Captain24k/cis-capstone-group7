@@ -9,6 +9,36 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
+// --- Basic Moderation add word here 
+
+const TOXIC_KEYWORDS = [
+  // profanity / insults (keep list minimal & generic)
+  "idiot","stupid","dumb","trash","hate","shut up","moron",
+  // harassment/threat-ish
+  "kill","hurt","die","threat","attack",
+  // workplace toxic phrases
+  "steal","corrupt","scam"
+];
+
+function normalizeText(s) {
+  return String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function detectToxicity(subject, feedbackText) {
+  const text = normalizeText(subject) + " " + normalizeText(feedbackText);
+  let hits = [];
+  for (const kw of TOXIC_KEYWORDS) {
+    if (!kw) continue;
+    if (text.includes(kw)) hits.push(kw);
+  }
+  const toxic = hits.length > 0;
+
+  return {
+    toxic,
+    reason: toxic ? ("Matched keywords: " + hits.slice(0, 6).join(", ")) : ""
+  };
+}
+
 function makeToken(user, role) {
   const raw = `${user}|${role}|${Date.now()}`;
   return Buffer.from(raw, "utf8").toString("base64");
@@ -76,20 +106,48 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
+//send baned word to emp 
+app.get("/api/moderation/keywords", requireAuth, requireRole("emp"), (req, res) => {
+  res.json({ ok: true, words: TOXIC_KEYWORDS });
+});
+
 app.post("/api/feedback", requireAuth, requireRole("emp"), async (req, res) => {
   const { department, category, subject, feedback_text } = req.body || {};
   if (!department || !category || !subject || !feedback_text) {
     return res.status(400).json({ ok: false, message: "Please fill out all fields." });
   }
 
+  // Run moderation check (server-side)
+  const mod = detectToxicity(subject, feedback_text);
+  const moderation_status = mod.toxic ? "flagged" : "approved";
+
   try {
-    await pool.query(
-      `INSERT INTO feedback (created_at, department, category, subject, feedback_text)
-       VALUES (NOW(), ?, ?, ?, ?)`,
-      [department, category, subject, feedback_text]
+    const [result] = await pool.query(
+      `INSERT INTO feedback (created_at, department, category, subject, feedback_text, upvotes, moderation_status, moderation_reason)
+       VALUES (NOW(), ?, ?, ?, ?, IFNULL(?,0), ?, ?)`,
+      [department, category, subject, feedback_text, 0, moderation_status, mod.reason || null]
     );
 
-    res.json({ ok: true, message: "Feedback submitted successfully." });
+    const feedbackId = result && result.insertId ? result.insertId : null;
+
+    // Store moderation flag details for manager review
+    if (mod.toxic && feedbackId) {
+      await pool.query(
+        `INSERT INTO feedback_moderation_queue (feedback_id, reason, status)
+         VALUES (?, ?, 'flagged')`,
+        [feedbackId, mod.reason || "Flagged by rule"]
+      );
+    }
+
+    if (mod.toxic) {
+      return res.json({
+        ok: true,
+        message: "Feedback received and is pending manager review.",
+        moderation: { status: "flagged", reason: mod.reason }
+      });
+    }
+
+    res.json({ ok: true, message: "Feedback submitted successfully.", moderation: { status: "approved" } });
   } catch (err) {
     res.status(500).json({ ok: false, message: "DB insert error", error: err.message });
   }
@@ -101,7 +159,7 @@ app.get("/api/feedback/employee", requireAuth, requireRole("emp"), async (req, r
   try {
     const [rows] = await pool.query(
       `SELECT feedback_id, created_at, department, category, subject, feedback_text, IFNULL(upvotes,0) AS upvotes
-       FROM feedback ORDER BY created_at DESC`
+       FROM feedback WHERE moderation_status = 'approved' ORDER BY created_at DESC`
     );
     res.json({ ok: true, data: rows });
   } catch (err) {
@@ -147,6 +205,77 @@ app.delete("/api/feedback", requireAuth, requireRole("manager"), async (req, res
     res.status(500).json({ ok: false, message: "DB delete error", error: err.message });
   }
 });
+
+
+// --- Moderation Queue (Manager) ---
+app.get("/api/moderation/flagged", requireAuth, requireRole("manager"), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT f.feedback_id, f.created_at, f.department, f.category, f.subject, f.feedback_text,
+              IFNULL(f.upvotes,0) AS upvotes,
+              f.moderation_status, f.moderation_reason,
+              mq.queue_id, mq.reason, mq.status AS flag_status, mq.created_at AS flagged_at
+       FROM feedback f
+       JOIN feedback_moderation_queue mq ON mq.feedback_id = f.feedback_id
+       WHERE f.moderation_status = 'flagged' AND mq.status = 'flagged'
+       ORDER BY mq.created_at DESC`
+    );
+    res.json({ ok: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: "DB read error", error: err.message });
+  }
+});
+
+app.post("/api/moderation/:id/approve", requireAuth, requireRole("manager"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, message: "Invalid feedback id" });
+
+  try {
+    await pool.query(
+      `UPDATE feedback
+       SET moderation_status = 'approved', moderated_at = NOW(), moderated_by = ?, moderation_reason = NULL
+       WHERE feedback_id = ?`,
+      [req.auth.user, id]
+    );
+
+    await pool.query(
+      `UPDATE feedback_moderation_queue
+       SET status = 'approved', reviewed_at = NOW(), reviewed_by = ?
+       WHERE feedback_id = ? AND status = 'flagged'`,
+      [req.auth.user, id]
+    );
+
+    res.json({ ok: true, message: "Approved." });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: "DB update error", error: err.message });
+  }
+});
+
+app.post("/api/moderation/:id/reject", requireAuth, requireRole("manager"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, message: "Invalid feedback id" });
+
+  try {
+    await pool.query(
+      `UPDATE feedback
+       SET moderation_status = 'rejected', moderated_at = NOW(), moderated_by = ?
+       WHERE feedback_id = ?`,
+      [req.auth.user, id]
+    );
+
+    await pool.query(
+      `UPDATE feedback_moderation_queue
+       SET status = 'rejected', reviewed_at = NOW(), reviewed_by = ?
+       WHERE feedback_id = ? AND status = 'flagged'`,
+      [req.auth.user, id]
+    );
+
+    res.json({ ok: true, message: "Rejected." });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: "DB update error", error: err.message });
+  }
+});
+
 
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
