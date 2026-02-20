@@ -79,16 +79,24 @@
 			var department = document.getElementById("ddlDepartment").value;
 			var category = document.getElementById("ddlCategory").value;
 			var subject = document.getElementById("txtSubject").value.trim();
-			var feedbackText = document.getElementById("txtFeedback").value.trim();
+			var what = document.getElementById("txtWhat").value.trim();
+			var impact = document.getElementById("txtImpact").value.trim();
+			var suggestion = document.getElementById("txtSuggestion").value.trim();
 
 			var msg = document.getElementById("msg");
 			msg.innerText = "";
 
-			if (department === "" || category === "" || subject === "" || feedbackText === "") {
+			if (department === "" || category === "" || subject === "" || what === "" || impact === "" || suggestion === "") {
 				msg.style.color = "red";
 				msg.innerText = "Please fill out all fields.";
 				return;
+
 			}
+			var feedbackText =
+				"What happened?\n" + what +
+				"\n\nImpact\n" + impact +
+				"\n\nSuggestion\n" + suggestion;
+			
 
 			var token = localStorage.getItem("token");
 
@@ -119,7 +127,9 @@
 				document.getElementById("ddlDepartment").value = "";
 				document.getElementById("ddlCategory").value = "";
 				document.getElementById("txtSubject").value = "";
-				document.getElementById("txtFeedback").value = "";
+				document.getElementById("txtWhat").value = "";
+				document.getElementById("txtImpact").value = "";
+				document.getElementById("txtSuggestion").value = "";
 
 				// Refresh browse list after submitting
 				LoadFeedbackForEmployees();
@@ -303,8 +313,14 @@
 			<label for="txtSubject">Subject</label>
 			<input id="txtSubject" type="text" placeholder="Short subject..." />
 
-			<label for="txtFeedback">Feedback</label>
-			<textarea id="txtFeedback" placeholder="Write your feedback..."></textarea>
+			<label for="txtWhat">What happened?</label>
+			<textarea id="txtWhat" placeholder="Briefly describe what happened..."></textarea>
+
+			<label for="txtImpact">Impact</label>
+			<textarea id="txtImpact" placeholder="Who/what did this affect and how?"></textarea>
+
+			<label for="txtSuggestion">Suggestion</label>
+			<textarea id="txtSuggestion" placeholder="What would you suggest as a fix or improvement?"></textarea>
 
 			<button class="primary" onclick="SubmitFeedbackHandler()">Submit</button>
 
