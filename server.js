@@ -130,6 +130,11 @@ app.post("/api/feedback", requireAuth, requireRole("emp"), async (req, res) => {
 
     const feedbackId = result && result.insertId ? result.insertId : null;
 
+    // Duplicate detection 
+    if (feedbackId) {
+      queuePotentialDuplicatesForFeedback(feedbackId, department, category, subject, feedback_text).catch(()=>{});
+    }
+
     // Store moderation flag details for manager review
     if (mod.toxic && feedbackId) {
       await pool.query(
@@ -273,6 +278,282 @@ app.post("/api/moderation/:id/reject", requireAuth, requireRole("manager"), asyn
     res.json({ ok: true, message: "Rejected." });
   } catch (err) {
     res.status(500).json({ ok: false, message: "DB update error", error: err.message });
+  }
+});
+
+// Duplicate Detection + Merge (ADD-ON)
+// Lightweight stopword list for keyword extraction
+const DUP_STOPWORDS = new Set([
+  "a","an","the","and","or","but","if","then","else","when","where","why","how",
+  "what","happened","happen","happening","impact","suggestion","suggest","prompt","prompts",
+  "to","of","in","on","for","with","as","at","by","from","into","about","over","under",
+  "is","are","was","were","be","been","being","it","its","this","that","these","those",
+  "i","me","my","we","our","you","your","he","she","they","them","their",
+  "do","does","did","done","have","has","had","can","could","should","would","will","may","might",
+  "not","no","yes","very","really","just","like"
+]);
+
+function extractKeywords(subject, feedbackText, max = 12) {
+  const raw = normalizeText(subject) + " " + normalizeText(feedbackText);
+  const cleaned = raw.replace(/[^a-z0-9\s]/g, " ");
+  const parts = cleaned.split(/\s+/g).filter(Boolean);
+
+  const freq = new Map();
+  for (const p of parts) {
+    if (p.length < 3) continue;
+    if (DUP_STOPWORDS.has(p)) continue;
+    freq.set(p, (freq.get(p) || 0) + 1);
+  }
+
+  const sorted = Array.from(freq.entries())
+    .sort((a, b) => (b[1] - a[1]) || (b[0].length - a[0].length))
+    .map(x => x[0]);
+
+  return sorted.slice(0, max);
+}
+
+function jaccard(aArr, bArr) {
+  const a = new Set(aArr || []);
+  const b = new Set(bArr || []);
+  if (a.size === 0 && b.size === 0) return 0;
+
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+
+  const union = a.size + b.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+function overlapList(aArr, bArr) {
+  const a = new Set(aArr || []);
+  const b = new Set(bArr || []);
+  const out = [];
+  for (const x of a) if (b.has(x)) out.push(x);
+  return out;
+}
+
+async function queuePotentialDuplicatesForFeedback(newFeedbackId, department, category, subject, feedbackText) {
+  try {
+    const [cands] = await pool.query(
+      `SELECT feedback_id, created_at, department, category, subject, feedback_text, IFNULL(upvotes,0) AS upvotes, moderation_status
+       FROM feedback
+       WHERE feedback_id <> ?
+         AND category = ?
+         AND (department = ? OR ? IS NULL)
+         AND moderation_status IN ('approved','flagged')
+         AND created_at >= DATE_SUB(NOW(), INTERVAL 180 DAY)
+       ORDER BY created_at DESC
+       LIMIT 200`,
+      [newFeedbackId, category, department, department]
+    );
+
+    const baseKeys = extractKeywords(subject, feedbackText);
+    if (baseKeys.length === 0) return;
+
+    for (const cand of (cands || [])) {
+      const candKeys = extractKeywords(cand.subject, cand.feedback_text);
+      const score = jaccard(baseKeys, candKeys);
+      const overlap = overlapList(baseKeys, candKeys);
+
+      const pass = (overlap.length >= 2 && score >= 0.20) || (overlap.length >= 3 && score >= 0.12);
+      if (!pass) continue;
+
+      await pool.query(
+        `INSERT INTO feedback_duplicate_queue
+          (base_feedback_id, candidate_feedback_id, category, score, overlap_keywords, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', NOW())`,
+        [
+          newFeedbackId,
+          cand.feedback_id,
+          category,
+          score,
+          overlap.slice(0, 8).join(",")
+        ]
+      );
+    }
+  } catch (err) {
+    console.warn("Duplicate queue skipped:", err && err.message ? err.message : err);
+  }
+}
+
+// --- Duplicate Queue (Manager) ---
+// List pending duplicate pairs
+app.get("/api/duplicates/pending", requireAuth, requireRole("manager"), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT q.pair_id, q.created_at AS flagged_at, q.category, q.score, q.overlap_keywords, q.status,
+              b.feedback_id AS base_id, b.created_at AS base_created_at, b.department AS base_department, b.subject AS base_subject,
+              IFNULL(b.upvotes,0) AS base_upvotes, b.moderation_status AS base_status,
+              c.feedback_id AS candidate_id, c.created_at AS cand_created_at, c.department AS cand_department, c.subject AS cand_subject,
+              IFNULL(c.upvotes,0) AS cand_upvotes, c.moderation_status AS cand_status
+       FROM feedback_duplicate_queue q
+       JOIN feedback b ON b.feedback_id = q.base_feedback_id
+       JOIN feedback c ON c.feedback_id = q.candidate_feedback_id
+       WHERE q.status = 'pending'
+       ORDER BY q.created_at DESC
+       LIMIT 300`
+    );
+    res.json({ ok: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: "DB read error", error: err.message });
+  }
+});
+
+// Ignore a suggested duplicate pair
+app.post("/api/duplicates/:pairId/ignore", requireAuth, requireRole("manager"), async (req, res) => {
+  const pairId = parseInt(req.params.pairId, 10);
+  if (!pairId) return res.status(400).json({ ok: false, message: "Invalid pair id" });
+
+  try {
+    await pool.query(
+      `UPDATE feedback_duplicate_queue
+       SET status = 'ignored', reviewed_at = NOW(), reviewed_by = ?
+       WHERE pair_id = ? AND status = 'pending'`,
+      [req.auth.user, pairId]
+    );
+    res.json({ ok: true, message: "Ignored." });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: "DB update error", error: err.message });
+  }
+});
+
+// Merge two feedback items 
+app.post("/api/duplicates/merge", requireAuth, requireRole("manager"), async (req, res) => {
+  const { master_id, duplicate_id, pair_id } = req.body || {};
+  const masterId = parseInt(master_id, 10);
+  const dupId = parseInt(duplicate_id, 10);
+  const pairId = pair_id ? parseInt(pair_id, 10) : null;
+
+  if (!masterId || !dupId || masterId === dupId) {
+    return res.status(400).json({ ok: false, message: "Provide master_id and duplicate_id (different ids)." });
+  }
+
+  // Use a transaction to keep counts consistent
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [[m]] = await conn.query(
+      `SELECT feedback_id, created_at, IFNULL(upvotes,0) AS upvotes, moderation_status
+       FROM feedback WHERE feedback_id = ? FOR UPDATE`,
+      [masterId]
+    );
+    const [[d]] = await conn.query(
+      `SELECT feedback_id, created_at, IFNULL(upvotes,0) AS upvotes, moderation_status
+       FROM feedback WHERE feedback_id = ? FOR UPDATE`,
+      [dupId]
+    );
+
+    if (!m || !d) {
+      await conn.rollback();
+      return res.status(404).json({ ok: false, message: "One or both feedback items not found." });
+    }
+
+    let finalMaster = m;
+    let finalDup = d;
+    if (new Date(d.created_at).getTime() < new Date(m.created_at).getTime()) {
+      finalMaster = d;
+      finalDup = m;
+    }
+
+    // Combine upvotes into the master
+    const newUpvotes = Number(finalMaster.upvotes || 0) + Number(finalDup.upvotes || 0);
+
+    await conn.query(
+      `UPDATE feedback
+       SET upvotes = ?
+       WHERE feedback_id = ?`,
+      [newUpvotes, finalMaster.feedback_id]
+    );
+
+    // Hide the duplicate from employees 
+    await conn.query(
+      `UPDATE feedback
+       SET moderation_status = 'merged',
+           moderation_reason = CONCAT('Merged into #', ?),
+           moderated_at = NOW(),
+           moderated_by = ?
+       WHERE feedback_id = ?`,
+      [finalMaster.feedback_id, req.auth.user, finalDup.feedback_id]
+    );
+
+    await conn.query(
+      `INSERT INTO feedback_merge_log
+         (master_feedback_id, merged_feedback_id, merged_by, merged_at,
+          master_created_at, merged_created_at,
+          master_upvotes_before, merged_upvotes, master_upvotes_after)
+       VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?)`,
+      [
+        finalMaster.feedback_id,
+        finalDup.feedback_id,
+        req.auth.user,
+        finalMaster.created_at,
+        finalDup.created_at,
+        Number(finalMaster.upvotes || 0),
+        Number(finalDup.upvotes || 0),
+        newUpvotes
+      ]
+    );
+
+    if (pairId) {
+      await conn.query(
+        `UPDATE feedback_duplicate_queue
+         SET status = 'merged', reviewed_at = NOW(), reviewed_by = ?
+         WHERE pair_id = ?`,
+        [req.auth.user, pairId]
+      );
+    } else {
+   
+      await conn.query(
+        `UPDATE feedback_duplicate_queue
+         SET status = 'merged', reviewed_at = NOW(), reviewed_by = ?
+         WHERE status = 'pending'
+           AND (
+             (base_feedback_id = ? AND candidate_feedback_id = ?)
+             OR (base_feedback_id = ? AND candidate_feedback_id = ?)
+           )`,
+        [req.auth.user, masterId, dupId, dupId, masterId]
+      );
+    }
+
+    await conn.commit();
+    res.json({ ok: true, message: "Merged.", master_id: finalMaster.feedback_id, upvotes: newUpvotes });
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    res.status(500).json({ ok: false, message: "Merge failed", error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// Manually trigger a rescan (optional)
+app.post("/api/duplicates/scan", requireAuth, requireRole("manager"), async (req, res) => {
+  const { limit } = req.body || {};
+  const n = Math.min(Math.max(parseInt(limit || 50, 10), 1), 200);
+
+  try {
+    const [recent] = await pool.query(
+      `SELECT feedback_id, department, category, subject, feedback_text
+       FROM feedback
+       WHERE moderation_status IN ('approved','flagged')
+       ORDER BY created_at DESC
+       LIMIT ?`,
+      [n]
+    );
+
+    for (const f of (recent || [])) {
+      await queuePotentialDuplicatesForFeedback(
+        f.feedback_id,
+        f.department,
+        f.category,
+        f.subject,
+        f.feedback_text
+      );
+    }
+
+    res.json({ ok: true, message: `Scan complete (checked ${n}).` });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: "Scan failed", error: err.message });
   }
 });
 
