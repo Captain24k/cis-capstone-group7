@@ -32,7 +32,12 @@
 		.card { border:1px solid #ddd; border-radius:6px; padding:12px; background:#fff; margin-bottom:10px; }
 		.cardTop { display:flex; gap:10px; justify-content:space-between; align-items:flex-start; }
 		.meta { font-size:12px; color:#666; }
-		.subject { font-weight:bold; margin:4px 0 6px 0; }
+		.subject { 
+        font-weight: bold; 
+        font-size: 22px; 
+        margin: 8px 0 10px 0; 
+        color: #111; 
+    }
 		.text { white-space:pre-wrap; font-size:14px; color:#111; }
 		.actions { display:flex; gap:8px; align-items:center; }
 		.pill { font-size:12px; background:#f2f2f2; border:1px solid #ddd; padding:4px 8px; border-radius:999px; }
@@ -282,7 +287,8 @@
 				html += '      <button class="primary" onclick="Upvote(' + id + ')">Upvote</button>';
 				html += '    </div>';
 				html += '  </div>';
-				html += '  <div class="text">' + EscapeHtml(item.feedback_text || "") + '</div>';
+				var formattedText = FormatGuidedPrompts(item.feedback_text || "");
+				html += '  <div class="text">' + formattedText + '</div>';
 				html += '</div>';
 			}
 
@@ -316,7 +322,49 @@
 			.catch(() => { /* ignore */ });
 		}
 
-		function EscapeHtml(s) {
+		
+		function FormatGuidedPrompts(raw) {
+			raw = String(raw || "");
+			var lines = raw.split(/\r?\n/);
+			var html = "";
+			var inIndent = false;
+
+			function closeIndent() {
+				if (inIndent) { html += "</div>"; inIndent = false; }
+			}
+
+			for (var i = 0; i < lines.length; i++) {
+				var line = lines[i];
+				var trimmed = (line || "").trim();
+
+				if (/^What happened\?$/i.test(trimmed)) {
+					closeIndent();
+					html += "<strong>What happened?</strong><br><div style='margin-left:20px'>";
+					inIndent = true;
+					continue;
+				}
+				if (/^Impact$/i.test(trimmed)) {
+					closeIndent();
+					html += "<br><strong>Impact</strong><br><div style='margin-left:20px'>";
+					inIndent = true;
+					continue;
+				}
+				if (/^Suggestion$/i.test(trimmed)) {
+					closeIndent();
+					html += "<br><strong>Suggestion</strong><br><div style='margin-left:20px'>";
+					inIndent = true;
+					continue;
+				}
+
+				html += EscapeHtml(line);
+				if (i < lines.length - 1) html += "<br>";
+			}
+
+			closeIndent();
+			return html;
+		}
+
+function EscapeHtml(s) {
 			return String(s)
 				.replace(/&/g, "&amp;")
 				.replace(/</g, "&lt;")
