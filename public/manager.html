@@ -14,6 +14,13 @@
 		.note { font-size:12px; color:#555; margin-bottom:10px; }
 		#msg { margin-top:12px; min-height:18px; font-size:14px; }
 
+		/* Tabs */
+		.tabs { display:flex; gap:8px; margin:10px 0 12px 0; }
+		.tab { padding:8px 12px; border-radius:4px; border:1px solid #ccc; background:#fafafa; cursor:pointer; }
+		.tab.active { background:#2d7ef7; border-color:#2d7ef7; color:#fff; }
+		.pill { display:inline-block; font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid #ddd; background:#f2f2f2; }
+		.smallBtn { padding:6px 10px; font-size:12px; }
+
 		.controls { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-top:10px; }
 		.control { display:flex; flex-direction:column; gap:6px; }
 		label { font-size:12px; color:#333; font-weight:bold; }
@@ -28,83 +35,303 @@
 		table { border-collapse:collapse; width:100%; margin-top:15px; }
 		th, td { border:1px solid #ccc; padding:8px; text-align:left; font-size:13px; vertical-align:top; }
 		th { background:#eee; }
+
 		#tableHolder { max-height:400px; overflow-y:auto; }
+
 		tr.clickable { cursor:pointer; }
 		tr.clickable:hover { background:#f5f5f5; }
+
 		.detailPanel { border:1px solid #ccc; border-radius:6px; padding:16px; margin-top:12px; background:#fafafa; display:none; }
 		.detailPanel h3 { margin:0 0 8px 0; }
 		.detailPanel .meta { font-size:12px; color:#666; margin-bottom:8px; }
 		.detailPanel .text { white-space:pre-wrap; }
+	
+		td.wrap { white-space: pre-wrap; word-break: break-word; max-width: 420px; }
 	</style>
 
 	<script>
 		var ALL_FEEDBACK = [];
+		var FLAGGED_LIST = [];
+		var AUTO_TIMER = null;
+
+		function showMsg(text, color) {
+			var msg = document.getElementById("msg");
+			msg.style.color = color || "red";
+			msg.innerText = text || "";
+		}
+
+		function apiBase() {
+			return window.location.origin;
+		}
+
+		function getToken() {
+			return localStorage.getItem("token") || "";
+		}
+
+		function forceLogout(message) {
+			localStorage.removeItem("role");
+			localStorage.removeItem("token");
+			if (message) alert(message);
+			window.location.href = "index.html";
+		}
+
+		async function safeJsonOrText(res) {
+			var ct = (res.headers.get("content-type") || "").toLowerCase();
+			try {
+				if (ct.indexOf("application/json") !== -1) {
+					return await res.json();
+				}
+				var txt = await res.text();
+				return { ok: res.ok, message: txt || ("HTTP " + res.status) };
+			} catch {
+				return { ok: res.ok, message: "Response parse error (HTTP " + res.status + ")" };
+			}
+		}
+
+		async function apiFetch(path, options) {
+			var controller = new AbortController();
+			var t = setTimeout(function () { controller.abort(); }, 10000);
+
+			try {
+				var res = await fetch(apiBase() + path, Object.assign({}, options || {}, { signal: controller.signal }));
+				var data = await safeJsonOrText(res);
+				return { res: res, data: data };
+			} finally {
+				clearTimeout(t);
+			}
+		}
+
+		function ShowTab(which) {
+			document.getElementById("tabReports").classList.remove("active");
+			document.getElementById("tabModeration").classList.remove("active");
+			document.getElementById("panelReports").style.display = "none";
+			document.getElementById("panelModeration").style.display = "none";
+			HideDetail();
+
+			if (which === "moderation") {
+				document.getElementById("tabModeration").classList.add("active");
+				document.getElementById("panelModeration").style.display = "block";
+				LoadFlaggedQueue();
+			} else {
+				document.getElementById("tabReports").classList.add("active");
+				document.getElementById("panelReports").style.display = "block";
+				LoadFeedbackForManager();
+			}
+		}
+
+		async function LoadFlaggedQueue() {
+			var holder = document.getElementById("flaggedHolder");
+			holder.innerHTML = "";
+			showMsg("");
+
+			var token = getToken();
+			if (!token) { forceLogout("Missing token. Please login again."); return; }
+
+			try {
+				var result = await apiFetch("/api/moderation/flagged", {
+					method: "GET",
+					headers: { "Authorization": "Bearer " + token }
+				});
+
+				if (result.res.status === 401) { forceLogout("Session expired. Please login again."); return; }
+				if (result.res.status === 403) { forceLogout("Forbidden. You are not a manager account."); return; }
+
+				var data = result.data || {};
+				if (!result.res.ok || !data.ok) {
+					showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
+					return;
+				}
+
+				var list = data.data || [];
+				FLAGGED_LIST = list;
+				RenderFlagged(list);
+				if (list.length === 0) showMsg("No flagged submissions right now.", "green");
+				else showMsg("Flagged queue: " + list.length + " item(s).", "green");
+			} catch (e) {
+				if (e && e.name === "AbortError") { showMsg("Request timed out. Is the Node server running?", "red"); return; }
+				showMsg("Connection error: " + (e && e.message ? e.message : "Unknown error"), "red");
+			}
+		}
+
+		function RenderFlagged(list) {
+			var holder = document.getElementById("flaggedHolder");
+			if (!list || list.length === 0) { holder.innerHTML = ""; return; }
+
+			var html = "<table>";
+			html += "<tr><th>Date</th><th>Department</th><th>Category</th><th>Subject</th><th>Feedback</th><th>Reason</th><th>Action</th></tr>";
+
+			for (var i = 0; i < list.length; i++) {
+				var x = list[i];
+				var id = Number(x.feedback_id || 0);
+				html += "<tr class=\"clickable\" onclick=\"ShowFlaggedDetail(" + id + ")\">";
+				html += "<td>" + EscapeHtml(String(x.created_at || "")) + "</td>";
+				html += "<td>" + EscapeHtml(String(x.department || "")) + "</td>";
+				html += "<td>" + EscapeHtml(String(x.category || "")) + "</td>";
+				html += "<td>" + EscapeHtml(String(x.subject || "")) + "</td>";
+				html += "<td class=\"wrap\">" + EscapeHtml(String(x.feedback_text || "")) + "</td>";
+				html += "<td>" + EscapeHtml(String(x.reason || x.moderation_reason || "")) + "</td>";
+				html += "<td>";
+				html += "<button class='primary smallBtn' onclick='event.stopPropagation();ApproveFlagged(" + id + ")'>Approve</button>";
+				html += "<button class='dark smallBtn' onclick='event.stopPropagation();RejectFlagged(" + id + ")'>Reject</button>";
+				html += "</td>";
+				html += "</tr>";
+			}
+
+			html += "</table>";
+			holder.innerHTML = html;
+		}
+
+		
+		function ShowFlaggedDetail(id){
+			var panel = document.getElementById("flaggedDetailPanel");
+			var subj = document.getElementById("flaggedDetailSubject");
+			var meta = document.getElementById("flaggedDetailMeta");
+			var text = document.getElementById("flaggedDetailText");
+			if(!panel) return;
+
+			var item = null;
+			for(var i=0;i<(FLAGGED_LIST||[]).length;i++){
+				if(Number(FLAGGED_LIST[i].feedback_id)===Number(id)){ item = FLAGGED_LIST[i]; break; }
+			}
+			if(!item){ panel.style.display="none"; return; }
+
+			subj.innerText = item.subject || "";
+			meta.innerText =
+				(String(item.created_at||"") + " • " + String(item.department||"") + " • " + String(item.category||"") + 
+				 " • upvotes: " + String(item.upvotes||0) + " • reason: " + String(item.reason||item.moderation_reason||""));
+			text.innerText = item.feedback_text || "";
+			panel.style.display="block";
+		}
+async function ApproveFlagged(id) {
+			if (!confirm("Approve this submission? It will become visible to employees.")) return;
+			var token = getToken();
+			try {
+				var result = await apiFetch("/api/moderation/" + id + "/approve", {
+					method: "POST",
+					headers: { "Authorization": "Bearer " + token }
+				});
+				var data = result.data || {};
+				if (!result.res.ok || !data.ok) {
+					showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
+					return;
+				}
+				showMsg("Approved.", "green");
+				LoadFlaggedQueue();
+				// Refresh reports list too
+				LoadFeedbackForManager();
+			} catch (e) {
+				showMsg("Connection error.", "red");
+			}
+		}
+
+		async function RejectFlagged(id) {
+			if (!confirm("Reject this submission? It will stay hidden.")) return;
+			var token = getToken();
+			try {
+				var result = await apiFetch("/api/moderation/" + id + "/reject", {
+					method: "POST",
+					headers: { "Authorization": "Bearer " + token }
+				});
+				var data = result.data || {};
+				if (!result.res.ok || !data.ok) {
+					showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
+					return;
+				}
+				showMsg("Rejected.", "green");
+				LoadFlaggedQueue();
+				LoadFeedbackForManager();
+			} catch (e) {
+				showMsg("Connection error.", "red");
+			}
+		}
 
 		window.onload = function () {
+			if (window.location.protocol === "file:") {
+				showMsg("Open this page through the Node server (example: http://localhost:3000), not by double-clicking the file.", "red");
+				return;
+			}
+
 			var role = localStorage.getItem("role");
-			var token = localStorage.getItem("token");
+			var token = getToken();
 
 			if (!token || role !== "manager") {
 				window.location.href = "index.html";
 				return;
 			}
 
-			LoadFeedbackForManager();
-			setInterval(LoadFeedbackForManager, 30000);
+			ShowTab("reports");
+
+			// Auto-refresh, but avoid stacking multiple intervals if page reloads oddly
+			if (AUTO_TIMER) clearInterval(AUTO_TIMER);
+			AUTO_TIMER = setInterval(function(){
+				// only refresh reports if the reports tab is active
+				var rep = document.getElementById('panelReports');
+				if (rep && rep.style.display !== 'none') LoadFeedbackForManager();
+			}, 30000);
 		};
 
 		function Logout() {
-			localStorage.removeItem("role");
-			localStorage.removeItem("token");
-			window.location.href = "index.html";
+			forceLogout();
 		}
 
-		function LoadFeedbackForManager() {
-			var msg = document.getElementById("msg");
+		async function LoadFeedbackForManager() {
 			var holder = document.getElementById("tableHolder");
-			var token = localStorage.getItem("token");
-
 			holder.innerHTML = "";
-			msg.innerText = "";
+			showMsg("");
 
-			fetch("/api/feedback", {
-				method: "GET",
-				headers: { "Authorization": "Bearer " + token }
-			})
-			.then(r => r.json())
-			.then(data => {
-				if (!data.ok) {
-					msg.style.color = "red";
-					msg.innerText = data.message || "Load failed.";
+			var token = getToken();
+			if (!token) {
+				forceLogout("Missing token. Please login again.");
+				return;
+			}
+
+			try {
+				var result = await apiFetch("/api/feedback", {
+					method: "GET",
+					headers: { "Authorization": "Bearer " + token }
+				});
+
+				// Handle auth failures clearly (often misread as “connection error”)
+				if (result.res.status === 401) {
+					forceLogout("Session expired. Please login again.");
+					return;
+				}
+				if (result.res.status === 403) {
+					forceLogout("Forbidden. You are not a manager account.");
+					return;
+				}
+
+				var data = result.data || {};
+				if (!result.res.ok || !data.ok) {
+					showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
 					return;
 				}
 
 				ALL_FEEDBACK = data.data || [];
 
+				BuildDepartmentFilter(ALL_FEEDBACK);
+				BuildCategoryFilter(ALL_FEEDBACK);
+
 				if (ALL_FEEDBACK.length === 0) {
-					msg.style.color = "red";
-					msg.innerText = "No feedback found yet.";
-					RenderTable([]); // empty render
+					RenderTable([]);
+					HideDetail();
+					showMsg("No feedback found yet.", "red");
 					return;
 				}
 
-				BuildDepartmentFilter(ALL_FEEDBACK);
-				BuildCategoryFilter(ALL_FEEDBACK);
 				RenderFromControls();
-
-				msg.style.color = "green";
-				msg.innerText = "Loaded " + ALL_FEEDBACK.length + " feedback item(s).";
-			})
-			.catch((e) => {
-				msg.style.color = "red";
-				msg.innerText = "Server error. Make sure Node.js server is running.";
-			});
+				showMsg("Loaded " + ALL_FEEDBACK.length + " feedback item(s).", "green");
+			} catch (e) {
+				if (e && e.name === "AbortError") {
+					showMsg("Request timed out. Is the Node server running?", "red");
+					return;
+				}
+				showMsg("Connection error: " + (e && e.message ? e.message : "Unknown error"), "red");
+			}
 		}
 
 		function BuildDepartmentFilter(list) {
 			var ddl = document.getElementById("ddlDepartmentFilter");
-
-			// keep current selection if possible
 			var current = ddl.value || "ALL";
 
 			var depts = {};
@@ -114,12 +341,10 @@
 			}
 
 			var keys = Object.keys(depts).sort();
-
 			var html = '<option value="ALL">All Departments</option>';
 			for (var j = 0; j < keys.length; j++) {
 				html += '<option value="' + EscapeHtml(keys[j]) + '">' + EscapeHtml(keys[j]) + '</option>';
 			}
-
 			ddl.innerHTML = html;
 
 			// restore selection if still exists
@@ -148,6 +373,7 @@
 			}
 			ddl.innerHTML = html;
 
+			// restore selection if still exists
 			var opts = ddl.options;
 			var found = false;
 			for (var k = 0; k < opts.length; k++) {
@@ -182,13 +408,12 @@
 				var av = Number(a.upvotes || 0);
 				var bv = Number(b.upvotes || 0);
 
-				// created_at from DB could be string; compare as Date
 				var ad = new Date(a.created_at || 0).getTime();
 				var bd = new Date(b.created_at || 0).getTime();
 
 				if (sort === "MOST_UPVOTED") {
 					if (bv !== av) return bv - av;
-					return bd - ad; 
+					return bd - ad;
 				}
 				if (sort === "NEWEST") return bd - ad;
 				if (sort === "OLDEST") return ad - bd;
@@ -198,9 +423,7 @@
 
 			RenderTable(list);
 
-			var msg = document.getElementById("msg");
-			msg.style.color = "green";
-			msg.innerText = "Showing " + list.length + " of " + ALL_FEEDBACK.length + " report(s).";
+			showMsg("Showing " + list.length + " of " + ALL_FEEDBACK.length + " report(s).", "green");
 		}
 
 		function RenderTable(list) {
@@ -215,7 +438,8 @@
 			html += "<tr><th>Date</th><th>Department</th><th>Category</th><th>Subject</th><th>Feedback</th><th>Upvotes</th></tr>";
 
 			for (var i = 0; i < list.length; i++) {
-				html += '<tr class="clickable" onclick="ShowDetail(' + list[i].feedback_id + ')">';
+				var id = Number(list[i].feedback_id || 0);
+				html += '<tr class="clickable" onclick="ShowDetail(' + id + ')">';
 				html += "<td>" + EscapeHtml(String(list[i].created_at || "")) + "</td>";
 				html += "<td>" + EscapeHtml(String(list[i].department || "")) + "</td>";
 				html += "<td>" + EscapeHtml(String(list[i].category || "")) + "</td>";
@@ -229,47 +453,72 @@
 			holder.innerHTML = html;
 		}
 
-		function ClearAllFeedback() {
-			var msg = document.getElementById("msg");
-			var holder = document.getElementById("tableHolder");
-			var token = localStorage.getItem("token");
+		async function ClearAllFeedback() {
+			var token = getToken();
+			if (!token) {
+				forceLogout("Missing token. Please login again.");
+				return;
+			}
 
-			fetch("/api/feedback", {
-				method: "DELETE",
-				headers: { "Authorization": "Bearer " + token }
-			})
-			.then(r => r.json())
-			.then(data => {
-				if (!data.ok) {
-					msg.style.color = "red";
-					msg.innerText = data.message || "Clear failed.";
+			showMsg("");
+
+			try {
+				var result = await apiFetch("/api/feedback", {
+					method: "DELETE",
+					headers: { "Authorization": "Bearer " + token }
+				});
+
+				if (result.res.status === 401) { forceLogout("Session expired. Please login again."); return; }
+				if (result.res.status === 403) { forceLogout("Forbidden. You are not a manager account."); return; }
+
+				var data = result.data || {};
+				if (!result.res.ok || !data.ok) {
+					showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
 					return;
 				}
 
 				ALL_FEEDBACK = [];
-				holder.innerHTML = "";
-				msg.style.color = "green";
-				msg.innerText = data.message || "All feedback cleared.";
-
+				document.getElementById("tableHolder").innerHTML = "";
 				BuildDepartmentFilter([]);
-			})
-			.catch(() => {
-				msg.style.color = "red";
-				msg.innerText = "Server error. Make sure Node.js server is running.";
-			});
+				BuildCategoryFilter([]);
+				HideDetail();
+				showMsg(data.message || "All feedback cleared.", "green");
+			} catch (e) {
+				if (e && e.name === "AbortError") {
+					showMsg("Request timed out. Is the Node server running?", "red");
+					return;
+				}
+				showMsg("Connection error: " + (e && e.message ? e.message : "Unknown error"), "red");
+			}
 		}
 
 		function ShowDetail(id) {
 			var panel = document.getElementById("detailPanel");
 			var item = null;
+
 			for (var i = 0; i < ALL_FEEDBACK.length; i++) {
-				if (ALL_FEEDBACK[i].feedback_id === id) { item = ALL_FEEDBACK[i]; break; }
+				if (Number(ALL_FEEDBACK[i].feedback_id) === Number(id)) {
+					item = ALL_FEEDBACK[i];
+					break;
+				}
 			}
-			if (!item) { panel.style.display = "none"; return; }
+
+			if (!item) { HideDetail(); return; }
+
 			document.getElementById("detailSubject").innerText = item.subject || "";
-			document.getElementById("detailMeta").innerText = (item.created_at || "") + " • " + (item.department || "") + " • " + (item.category || "") + " • " + (item.upvotes || 0) + " upvote(s)";
+			document.getElementById("detailMeta").innerText =
+				(item.created_at || "") + " • " +
+				(item.department || "") + " • " +
+				(item.category || "") + " • " +
+				(item.upvotes || 0) + " upvote(s)";
+
 			document.getElementById("detailText").innerText = item.feedback_text || "";
 			panel.style.display = "block";
+		}
+
+		function HideDetail() {
+			var panel = document.getElementById("detailPanel");
+			if (panel) panel.style.display = "none";
 		}
 
 		function EscapeHtml(s) {
@@ -286,7 +535,14 @@
 <body>
 	<div class="box">
 		<h2>Manager Dashboard</h2>
-	
+
+		<div class="tabs">
+			<div id="tabReports" class="tab active" onclick="ShowTab('reports')">Reports</div>
+			<div id="tabModeration" class="tab" onclick="ShowTab('moderation')">Moderation Queue</div>
+			<div style="flex:1"></div>
+		</div>
+
+		<div id="panelReports">
 
 		<div class="controls">
 			<div class="control">
@@ -326,6 +582,13 @@
 			<h3 id="detailSubject"></h3>
 			<div id="detailMeta" class="meta"></div>
 			<div id="detailText" class="text"></div>
+		</div>
+		</div> <!-- end panelReports -->
+
+		<div id="panelModeration" style="display:none;">
+			<p class="note">Flagged submissions are hidden from employees until you approve them.</p>
+			<button class="primary" onclick="LoadFlaggedQueue()">Refresh Flagged Queue</button>
+			<div id="flaggedHolder" style="margin-top:12px;"></div>
 		</div>
 	</div>
 </body>

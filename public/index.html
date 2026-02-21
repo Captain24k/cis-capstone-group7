@@ -21,29 +21,79 @@
 			localStorage.setItem("role", role);
 		}
 
-		function LoginHandler() {
+		function showMsg(text, color) {
+			var msg = document.getElementById("msg");
+			msg.style.color = color || "red";
+			msg.innerText = text || "";
+		}
+
+		function apiBase() {
+			
+			return window.location.origin;
+		}
+
+		async function safeJsonOrText(res) {
+			var ct = (res.headers.get("content-type") || "").toLowerCase();
+			try {
+				if (ct.indexOf("application/json") !== -1) {
+					return await res.json();
+				}
+				var txt = await res.text();
+				return { ok: res.ok, message: txt || ("HTTP " + res.status) };
+			} catch (e) {
+				// If parsing fails, return a useful fallback
+				return { ok: res.ok, message: "Response parse error (HTTP " + res.status + ")" };
+			}
+		}
+
+		async function apiFetch(path, options) {
+			
+			var controller = new AbortController();
+			var t = setTimeout(function () { controller.abort(); }, 10000);
+
+			try {
+				var res = await fetch(apiBase() + path, Object.assign({}, options || {}, { signal: controller.signal }));
+				var data = await safeJsonOrText(res);
+				return { res: res, data: data };
+			} finally {
+				clearTimeout(t);
+			}
+		}
+
+		window.onload = function () {
+			
+			if (window.location.protocol === "file:") {
+				showMsg("Open this page through the Node server (example: http://localhost:3000), not by double-clicking the file.", "red");
+			}
+		};
+
+		async function LoginHandler() {
 			var user = document.getElementById("txtId").value.trim();
 			var pass = document.getElementById("txtPass").value.trim();
-			var msg = document.getElementById("msg");
 
-			msg.innerText = "";
+			showMsg("");
 
 			if (user === "" || pass === "") {
-				msg.style.color = "red";
-				msg.innerText = "Please enter ID and password.";
+				showMsg("Please enter ID and password.", "red");
 				return;
 			}
 
-			fetch("/api/login", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ user: user, password: pass })
-			})
-			.then(r => r.json())
-			.then(data => {
-				if (!data.ok) {
-					msg.style.color = "red";
-					msg.innerText = data.message || "Login failed.";
+			try {
+				var result = await apiFetch("/api/login", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ user: user, password: pass })
+				});
+
+				var data = result.data || {};
+
+				if (!result.res.ok || !data.ok) {
+					showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
+					return;
+				}
+
+				if (!data.token || !data.role) {
+					showMsg("Login response missing token/role. Check server response.", "red");
 					return;
 				}
 
@@ -54,14 +104,15 @@
 				} else if (data.role === "manager") {
 					window.location.href = "manager.html";
 				} else {
-					msg.style.color = "red";
-					msg.innerText = "Unknown role in database.";
+					showMsg("Unknown role in database.", "red");
 				}
-			})
-			.catch(() => {
-				msg.style.color = "red";
-				msg.innerText = "Server error. Make sure Node.js server is running.";
-			});
+			} catch (e) {
+				if (e && e.name === "AbortError") {
+					showMsg("Request timed out. Is the Node server running?", "red");
+					return;
+				}
+				showMsg("Connection error: " + (e && e.message ? e.message : "Unknown error"), "red");
+			}
 		}
 	</script>
 </head>

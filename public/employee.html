@@ -41,6 +41,52 @@
 	<script>
 		var ALL_FEEDBACK = [];
 
+		//  
+		var TOXIC_KEYWORDS = [];
+		var TOXIC_LOADED = false;
+
+		function NormalizeText(s) {
+			return String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+		}
+
+		function LooksToxic(subject, feedbackText) {
+			// If list didn't load,
+			if (!TOXIC_LOADED || !TOXIC_KEYWORDS || TOXIC_KEYWORDS.length === 0) return false;
+
+			var t = NormalizeText(subject) + " " + NormalizeText(feedbackText);
+
+			for (var i = 0; i < TOXIC_KEYWORDS.length; i++) {
+				var kw = NormalizeText(TOXIC_KEYWORDS[i]);
+				if (!kw) continue;
+				if (t.indexOf(kw) >= 0) return true;
+			}
+			return false;
+		}
+
+		function LoadBannedWords() {
+			var token = localStorage.getItem("token");
+			if (!token) return;
+
+			fetch("/api/moderation/keywords", {
+				method: "GET",
+				headers: { "Authorization": "Bearer " + token }
+			})
+			.then(r => r.json())
+			.then(data => {
+				if (data && data.ok && Array.isArray(data.words)) {
+					TOXIC_KEYWORDS = data.words;
+					TOXIC_LOADED = true;
+				} else {
+					TOXIC_KEYWORDS = [];
+					TOXIC_LOADED = false;
+				}
+			})
+			.catch(() => {
+				TOXIC_KEYWORDS = [];
+				TOXIC_LOADED = false;
+			});
+		}
+
 		window.onload = function () {
 			var role = localStorage.getItem("role");
 			var token = localStorage.getItem("token");
@@ -49,6 +95,9 @@
 				window.location.href = "index.html";
 				return;
 			}
+
+			//  Load banned words from server 
+			LoadBannedWords();
 
 			ShowTab("submit");
 			LoadFeedbackForEmployees();
@@ -79,6 +128,7 @@
 			var department = document.getElementById("ddlDepartment").value;
 			var category = document.getElementById("ddlCategory").value;
 			var subject = document.getElementById("txtSubject").value.trim();
+
 			var what = document.getElementById("txtWhat").value.trim();
 			var impact = document.getElementById("txtImpact").value.trim();
 			var suggestion = document.getElementById("txtSuggestion").value.trim();
@@ -90,13 +140,18 @@
 				msg.style.color = "red";
 				msg.innerText = "Please fill out all fields.";
 				return;
-
 			}
+
 			var feedbackText =
 				"What happened?\n" + what +
 				"\n\nImpact\n" + impact +
 				"\n\nSuggestion\n" + suggestion;
-			
+
+			//  Warning uses words loaded from server
+			if (LooksToxic(subject, feedbackText)) {
+				var ok = confirm("Warning: your message may contain inappropriate language. It may be hidden until a manager reviews it. Submit anyway?");
+				if (!ok) return;
+			}
 
 			var token = localStorage.getItem("token");
 
@@ -131,7 +186,6 @@
 				document.getElementById("txtImpact").value = "";
 				document.getElementById("txtSuggestion").value = "";
 
-				// Refresh browse list after submitting
 				LoadFeedbackForEmployees();
 			})
 			.catch(() => {
@@ -189,7 +243,6 @@
 			} else if (sort === "oldest") {
 				list.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
 			} else {
-				// newest
 				list.sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
 			}
 
@@ -246,7 +299,6 @@
 			.then(data => {
 				if (!data.ok) return;
 
-				// Update local cache
 				for (var i = 0; i < ALL_FEEDBACK.length; i++) {
 					if (ALL_FEEDBACK[i].feedback_id === feedbackId) {
 						ALL_FEEDBACK[i].upvotes = data.upvotes;
@@ -257,7 +309,6 @@
 				var pill = document.getElementById("upCount_" + feedbackId);
 				if (pill) pill.innerText = data.upvotes + " upvote(s)";
 
-				// If currently sorted by upvotes, re-render so order updates
 				if (document.getElementById("sortBy").value === "upvotes") {
 					ApplyFiltersAndRender();
 				}
@@ -323,7 +374,6 @@
 			<textarea id="txtSuggestion" placeholder="What would you suggest as a fix or improvement?"></textarea>
 
 			<button class="primary" onclick="SubmitFeedbackHandler()">Submit</button>
-
 			<div id="msg"></div>
 		</div>
 

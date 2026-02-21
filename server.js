@@ -12,11 +12,11 @@ app.use(express.static(path.join(__dirname, "public")));
 // --- Basic Moderation add word here 
 
 const TOXIC_KEYWORDS = [
-  // profanity / insults (keep list minimal & generic)
+  //
   "idiot","stupid","dumb","trash","hate","shut up","moron",
-  // harassment/threat-ish
+  
   "kill","hurt","die","threat","attack",
-  // workplace toxic phrases
+  
   "steal","corrupt","scam"
 ];
 
