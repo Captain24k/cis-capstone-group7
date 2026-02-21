@@ -591,5 +591,408 @@ async function ApproveFlagged(id) {
 			<div id="flaggedHolder" style="margin-top:12px;"></div>
 		</div>
 	</div>
+
+<!-- Duplicate Feedback Merging -->
+<script>
+(function(){
+  function el(tag, attrs, html){
+    var e = document.createElement(tag);
+    attrs = attrs || {};
+    Object.keys(attrs).forEach(function(k){
+      if(k === "class") e.className = attrs[k];
+      else if(k === "style") e.style.cssText = attrs[k];
+      else e.setAttribute(k, attrs[k]);
+    });
+    if (html != null) e.innerHTML = html;
+    return e;
+  }
+
+  function ensureDuplicatesTab(){
+    var tabs = document.querySelector(".tabs");
+    if(!tabs) return;
+
+    if(document.getElementById("tabDuplicates")) return; // already added
+
+    var btn = el("div", { id:"tabDuplicates", class:"tab" }, "Duplicates");
+    btn.onclick = function(){ ShowTab("duplicates"); };
+    tabs.appendChild(btn);
+
+    var box = document.querySelector(".box");
+    if(!box) return;
+
+    var panel = el("div", { id:"panelDuplicates", style:"display:none;" });
+
+    panel.appendChild(el("div", { class:"note" },
+      "Shows potential duplicate feedback (same category + keyword overlap). " +
+      "Use Merge to combine upvotes into the earliest submission, and hide the duplicate from employees."
+    ));
+
+    var actions = el("div", { style:"display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px;" });
+    var scanBtn = el("button", { class:"primary smallBtn", type:"button" }, "Rescan Recent");
+    scanBtn.onclick = function(){ ScanDuplicates(); };
+    var refreshBtn = el("button", { class:"dark smallBtn", type:"button" }, "Refresh");
+    refreshBtn.onclick = function(){ LoadDuplicateQueue(); };
+
+    actions.appendChild(scanBtn);
+    actions.appendChild(refreshBtn);
+    panel.appendChild(actions);
+
+    panel.appendChild(el("div", { id:"dupMsg", style:"margin-top:10px; min-height:18px; font-size:14px;" }, ""));
+    panel.appendChild(el("div", { id:"dupHolder", style:"margin-top:10px;" }, ""));
+
+    var mod = document.getElementById("panelModeration");
+    if(mod && mod.parentNode) {
+      mod.parentNode.insertBefore(panel, mod.nextSibling);
+    } else {
+      box.appendChild(panel);
+    }
+
+    var _ShowTab = window.ShowTab;
+    if(typeof _ShowTab !== "function") return;
+
+    window.ShowTab = function(which){
+      _ShowTab(which === "duplicates" ? "reports" : which);
+
+      var tabRep = document.getElementById("tabReports");
+      var tabMod = document.getElementById("tabModeration");
+      var tabDup = document.getElementById("tabDuplicates");
+
+      var panRep = document.getElementById("panelReports");
+      var panMod = document.getElementById("panelModeration");
+      var panDup = document.getElementById("panelDuplicates");
+
+      if(!tabDup || !panDup) return;
+
+      if(which === "duplicates"){
+        if(tabRep) tabRep.classList.remove("active");
+        if(tabMod) tabMod.classList.remove("active");
+        tabDup.classList.add("active");
+
+        if(panRep) panRep.style.display = "none";
+        if(panMod) panMod.style.display = "none";
+        panDup.style.display = "block";
+
+        if(typeof window.HideDetail === "function") window.HideDetail();
+        LoadDuplicateQueue();
+      } else {
+        tabDup.classList.remove("active");
+        panDup.style.display = "none";
+      }
+    };
+  }
+
+  function setDupMsg(text, color){
+    var m = document.getElementById("dupMsg");
+    if(!m) return;
+    m.style.color = color || "red";
+    m.innerText = text || "";
+  }
+
+  function getTokenSafe(){
+    return (typeof window.getToken === "function") ? window.getToken() : (localStorage.getItem("token") || "");
+  }
+
+  async function LoadDuplicateQueue(){
+    var holder = document.getElementById("dupHolder");
+    if(holder) holder.innerHTML = "";
+    setDupMsg("");
+
+    var token = getTokenSafe();
+    if(!token) { setDupMsg("Missing token. Please login again.", "red"); return; }
+
+    try {
+      var result = await window.apiFetch("/api/duplicates/pending", {
+        method: "GET",
+        headers: { "Authorization": "Bearer " + token }
+      });
+
+      if (result.res.status === 401) { window.forceLogout("Session expired. Please login again."); return; }
+      if (result.res.status === 403) { window.forceLogout("Forbidden. You are not a manager account."); return; }
+
+      var data = result.data || {};
+      if (!result.res.ok || !data.ok) {
+        setDupMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
+        return;
+      }
+
+      var list = data.data || [];
+      RenderDuplicateQueue(list);
+
+      if(list.length === 0) setDupMsg("No pending duplicate suggestions.", "green");
+      else setDupMsg("Pending duplicate suggestions: " + list.length, "green");
+    } catch (e) {
+      setDupMsg("Connection error.", "red");
+    }
+  }
+
+  function esc(s){
+    if(typeof window.EscapeHtml === "function") return window.EscapeHtml(String(s||""));
+  
+    return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  function RenderDuplicateQueue(list){
+    var holder = document.getElementById("dupHolder");
+    if(!holder) return;
+
+    if(!list || list.length === 0){
+      holder.innerHTML = "";
+      return;
+    }
+
+    var html = "<table>";
+    html += "<tr><th>Flagged</th><th>Category</th><th>Score</th><th>Overlap</th><th>Older (kept)</th><th>Newer (merged)</th><th>Actions</th></tr>";
+
+    for(var i=0;i<list.length;i++){
+      var x = list[i];
+
+      // choose older/newer for display only
+      var baseIsOlder = new Date(x.base_created_at).getTime() <= new Date(x.cand_created_at).getTime();
+      var olderId = baseIsOlder ? x.base_id : x.candidate_id;
+      var newerId = baseIsOlder ? x.candidate_id : x.base_id;
+
+      var olderSubj = baseIsOlder ? x.base_subject : x.cand_subject;
+      var newerSubj = baseIsOlder ? x.cand_subject : x.base_subject;
+
+      var olderDept = baseIsOlder ? x.base_department : x.cand_department;
+      var newerDept = baseIsOlder ? x.cand_department : x.base_department;
+
+      var olderUp = baseIsOlder ? x.base_upvotes : x.cand_upvotes;
+      var newerUp = baseIsOlder ? x.cand_upvotes : x.base_upvotes;
+
+      html += "<tr>";
+      html += "<td>" + esc(x.flagged_at||"") + "</td>";
+      html += "<td>" + esc(x.category||"") + "</td>";
+      html += "<td>" + esc((Number(x.score||0)).toFixed(2)) + "</td>";
+      html += "<td>" + esc(x.overlap_keywords||"") + "</td>";
+      html += "<td><div class='pill'>#" + esc(olderId) + "</div> " + esc(olderDept||"") + "<br><b>" + esc(olderSubj||"") + "</b><br><span class='small'>upvotes: " + esc(olderUp||0) + "</span></td>";
+      html += "<td><div class='pill'>#" + esc(newerId) + "</div> " + esc(newerDept||"") + "<br><b>" + esc(newerSubj||"") + "</b><br><span class='small'>upvotes: " + esc(newerUp||0) + "</span></td>";
+      html += "<td>";
+      html += "<button class='primary smallBtn' onclick='window.__dupMerge(" + esc(x.pair_id) + "," + esc(olderId) + "," + esc(newerId) + ")'>Merge</button>";
+      html += "<button class='dark smallBtn' onclick='window.__dupIgnore(" + esc(x.pair_id) + ")'>Ignore</button>";
+      html += "</td>";
+      html += "</tr>";
+    }
+
+    html += "</table>";
+    holder.innerHTML = html;
+  }
+
+  window.__dupIgnore = async function(pairId){
+    if(!confirm("Ignore this duplicate suggestion?")) return;
+    var token = getTokenSafe();
+    try{
+      var result = await window.apiFetch("/api/duplicates/" + pairId + "/ignore", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + token }
+      });
+      var data = result.data || {};
+      if(!result.res.ok || !data.ok){
+        setDupMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
+        return;
+      }
+      setDupMsg("Ignored.", "green");
+      LoadDuplicateQueue();
+    }catch(e){
+      setDupMsg("Connection error.", "red");
+    }
+  };
+
+  window.__dupMerge = async function(pairId, masterId, dupId){
+    if(!confirm("Merge these items?\n\n- Upvotes will be combined.\n- The newer item will be hidden from employees.\n- Original timestamps stay in the database (audit log).")) return;
+    var token = getTokenSafe();
+
+    try{
+      var result = await window.apiFetch("/api/duplicates/merge", {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "Authorization": "Bearer " + token },
+        body: JSON.stringify({ pair_id: pairId, master_id: masterId, duplicate_id: dupId })
+      });
+      var data = result.data || {};
+      if(!result.res.ok || !data.ok){
+        setDupMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
+        return;
+      }
+      setDupMsg("Merged into #" + data.master_id + " (new upvotes: " + data.upvotes + ").", "green");
+
+      // Refresh duplicates + main feedback list
+      LoadDuplicateQueue();
+      if(typeof window.LoadFeedbackForManager === "function") window.LoadFeedbackForManager();
+    }catch(e){
+      setDupMsg("Connection error.", "red");
+    }
+  };
+
+  async function ScanDuplicates(){
+    if(!confirm("Rescan recent feedback for duplicates? (This can take a few seconds.)")) return;
+    setDupMsg("Scanning...", "#444");
+    var token = getTokenSafe();
+    try{
+      var result = await window.apiFetch("/api/duplicates/scan", {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "Authorization": "Bearer " + token },
+        body: JSON.stringify({ limit: 80 })
+      });
+      var data = result.data || {};
+      if(!result.res.ok || !data.ok){
+        setDupMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
+        return;
+      }
+      setDupMsg(data.message || "Scan complete.", "green");
+      LoadDuplicateQueue();
+    }catch(e){
+      setDupMsg("Connection error.", "red");
+    }
+  }
+
+  window.addEventListener("load", function(){
+    ensureDuplicatesTab();
+  });
+})();
+</script>
+
+
+<script>
+
+(function(){
+  function escapeHtml(s){
+    return String(s || "").replace(/[&<>"']/g, function(ch){
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]);
+    });
+  }
+
+  function normalizeHeading(h){
+    h = String(h || "").trim().toLowerCase();
+    if (h.indexOf("what happened") === 0) return "What happened?";
+    if (h.indexOf("impact") === 0) return "Impact";
+    if (h.indexOf("suggest") === 0) return "Suggestion";
+    return h;
+  }
+
+  function formatGuidedPrompts(text){
+    var t = String(text || "");
+    
+    if (!/what\s*happened|\bimpact\b|\bsuggestion\b/i.test(t)) {
+      return '<div class="gp-plain">' + escapeHtml(t) + '</div>';
+    }
+
+    var re = /(^|\n)\s*(what\s*happened\??|impact|suggestion)\s*[:\-]?\s*/ig;
+    var parts = [];
+    var lastIdx = 0;
+    var match;
+
+    while ((match = re.exec(t)) !== null) {
+      var idx = match.index;
+      var head = match[2];
+     
+      if (parts.length === 0 && idx > 0) {
+        var intro = t.slice(0, idx).trim();
+        if (intro) parts.push({ type:"intro", text:intro });
+      }
+      parts.push({ type:"heading", heading: head, start: re.lastIndex });
+      lastIdx = re.lastIndex;
+    }
+
+    if (parts.length === 0) {
+      return '<div class="gp-plain">' + escapeHtml(t) + '</div>';
+    }
+
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].type !== "heading") continue;
+      var start = parts[i].start;
+     
+      var end = t.length;
+      var sub = t.slice(start);
+      var m2 = sub.match(/(\n)\s*(what\s*happened\??|impact|suggestion)\s*[:\-]?\s*/i);
+      if (m2 && m2.index !== undefined) end = start + m2.index;
+      var ans = t.slice(start, end).trim();
+      parts[i].answer = ans;
+    }
+
+    var html = '<div class="gp">';
+    for (var j = 0; j < parts.length; j++) {
+      var p = parts[j];
+      if (p.type === "intro") {
+        html += '<div class="gp-intro">' + escapeHtml(p.text) + '</div>';
+      } else if (p.type === "heading") {
+        html += '<div class="gp-label">' + escapeHtml(normalizeHeading(p.heading)) + '</div>';
+        html += '<div class="gp-answer">' + escapeHtml(p.answer || "") + '</div>';
+      }
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function injectStyles(){
+    if (document.getElementById("gpStyles")) return;
+    var css = ''
+      + '.gp{ line-height:1.35; }'
+      + '.gp-label{ font-weight:bold; margin-top:6px; }'
+      + '.gp-answer{ margin-left:16px; }'
+      + '.gp-intro{ margin-bottom:6px; }'
+      + '.gp-plain{ white-space:pre-wrap; }';
+    var style = document.createElement("style");
+    style.id = "gpStyles";
+    style.appendChild(document.createTextNode(css));
+    document.head.appendChild(style);
+  }
+
+  function postProcessTable(){
+    injectStyles();
+    var holder = document.getElementById("tableHolder");
+    if (!holder) return;
+    var table = holder.querySelector("table");
+    if (!table) return;
+
+    var rows = table.querySelectorAll("tr");
+    for (var i = 1; i < rows.length; i++) { 
+      var tds = rows[i].querySelectorAll("td");
+      if (tds && tds.length >= 5) {
+        var cell = tds[4];
+        if (cell && !cell.getAttribute("data-gp")) {
+          var raw = cell.textContent || "";
+          cell.innerHTML = formatGuidedPrompts(raw);
+          cell.setAttribute("data-gp", "1");
+        }
+      }
+    }
+  }
+
+  function postProcessDetail(){
+    injectStyles();
+    var panel = document.getElementById("detailPanel");
+    if (!panel) return;
+    var textEl = panel.querySelector(".text");
+    if (!textEl) return;
+    if (textEl.getAttribute("data-gp")) return;
+    var raw = textEl.textContent || "";
+    textEl.innerHTML = formatGuidedPrompts(raw);
+    textEl.setAttribute("data-gp", "1");
+  }
+
+  window.addEventListener("load", function(){
+    try {
+      if (typeof RenderTable === "function" && !RenderTable.__gpWrapped) {
+        var _rt = RenderTable;
+        RenderTable = function(list){
+          _rt(list);
+          postProcessTable();
+        };
+        RenderTable.__gpWrapped = true;
+      }
+      if (typeof ShowDetail === "function" && !ShowDetail.__gpWrapped) {
+        var _sd = ShowDetail;
+        ShowDetail = function(id){
+          _sd(id);
+          setTimeout(postProcessDetail, 0);
+        };
+        ShowDetail.__gpWrapped = true;
+      }
+    } catch (e) {
+    }
+  });
+})();
+</script>
+
 </body>
 </html>
