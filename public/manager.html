@@ -6,7 +6,7 @@
 
 	<style>
 		body { font-family: Arial; background:#f4f4f4; margin:0; }
-		.box { width:860px; margin:40px auto; background:#fff; padding:20px; border:1px solid #ddd; border-radius:6px; }
+		.box { max-width:860px; width:calc(100% - 40px); margin:40px auto; background:#fff; padding:20px; border:1px solid #ddd; border-radius:6px; }
 		h2 { margin-top:0; }
 		button { margin-top:10px; padding:8px 12px; border:none; border-radius:4px; cursor:pointer; margin-right:8px; }
 		.primary { background:#2d7ef7; color:#fff; }
@@ -51,7 +51,7 @@
 		/* Trend summaries */
 		.summaryGrid{
 			display:grid;
-			grid-template-columns: repeat(3, 1fr);
+			grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
 			gap:12px;
 			margin-top:14px;
 		}
@@ -60,11 +60,22 @@
 			border-radius:8px;
 			padding:12px;
 			background:#fafafa;
+			min-width:0; 
 		}
 		.summaryCard h3{ margin:0 0 8px 0; font-size:14px; }
-		.miniChartRow{ display:flex; align-items:center; gap:10px; margin:6px 0; font-size:13px; }
+		.miniChartRow{ display:flex; align-items:center; gap:10px; margin:6px 0; font-size:13px; flex-wrap:wrap; }
+		.miniChartRow > div:first-child{ flex:1 1 220px; min-width:0; word-break:break-word; }
+		.miniChartRow > div:last-child{ white-space:nowrap; }
+
+		.miniChartRow div[style*="min-width:260px"]{ min-width:0 !important; flex:1 1 220px; }
+		.miniChartRow div[style*="min-width:160px"]{ min-width:0 !important; flex:1 1 160px; }
+
 		.bar{ height:10px; background:#2d7ef7; border-radius:6px; min-width:2px; }
 		.smallMuted{ font-size:12px; color:#666; }
+
+		#sumTrendOverTime{ overflow-x:auto; }
+		#sumTrendOverTime table{ margin-top:8px; min-width:520px; }
+		#sumTrendOverTime th, #sumTrendOverTime td{ white-space:nowrap; }
 	</style>
 
 	<script>
@@ -729,14 +740,13 @@
 			<div id="detailMeta" class="meta"></div>
 			<div id="detailText" class="text"></div>
 		</div>
-		</div> <!-- end panelReports -->
+		</div> 
 
 		<div id="panelModeration" style="display:none;">
 			<p class="note">Flagged submissions are hidden from employees until you approve them.</p>
 			<button class="primary" onclick="LoadFlaggedQueue()">Refresh Flagged Queue</button>
 			<div id="flaggedHolder" style="margin-top:12px;"></div>
 
-			<!-- Optional detail panel (kept because your JS references it) -->
 			<div id="flaggedDetailPanel" class="detailPanel">
 				<h3 id="flaggedDetailSubject"></h3>
 				<div id="flaggedDetailMeta" class="meta"></div>
