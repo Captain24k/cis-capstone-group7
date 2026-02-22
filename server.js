@@ -20,6 +20,127 @@ const TOXIC_KEYWORDS = [
   "steal","corrupt","scam"
 ];
 
+const EXTRA_TOXIC_KEYWORDS = [
+  "fuck", "fucking", "shit", "bitch", "asshole", "bastard", "dick", "pussy", "cunt",
+  "retard", "loser", "jerk", "scumbag", "piece of shit", "racist", "sexist", "homophobic",
+
+  "kill you", "hurt you", "i will hurt", "i will kill", "die bitch"
+];
+
+try {
+  for (const w of EXTRA_TOXIC_KEYWORDS) {
+    if (w && !TOXIC_KEYWORDS.includes(w)) TOXIC_KEYWORDS.push(w);
+  }
+} catch { 
+
+}
+
+function normalizeForModeration(input) {
+  let s = String(input || "").toLowerCase();
+
+  try {
+    s = s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  } catch { 
+
+  }
+
+  const map = {
+    "0": "o",
+    "1": "i",
+    "2": "z",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "6": "g",
+    "7": "t",
+    "8": "b",
+    "9": "g",
+    "@": "a",
+    "$": "s",
+    "!": "i"
+  };
+  s = s.replace(/[0123456789@\$!]/g, (ch) => map[ch] || ch);
+  s = s.replace(/[\*\-_.~^`|\\/]+/g, " ");
+  s = s.replace(/([a-z])\1{2,}/g, "$1$1");
+  s = s.replace(/\s+/g, " ").trim();
+  return s;
+}
+
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function makeObfuscatedWordRegex(word) {
+  const w = String(word || "").toLowerCase().trim();
+  if (!w) return null;
+  const chars = w.split("").map(escapeRegex);
+  const sep = "[^a-z0-9]{0,3}";
+  const body = chars.join(sep);
+  return new RegExp(`\\b${body}\\b`, "i");
+}
+
+const PROFANITY_BASE_WORDS = [
+  "fuck", "shit", "bitch", "asshole", "bastard", "dick", "pussy", "cunt"
+];
+const PROFANITY_REGEXES = PROFANITY_BASE_WORDS
+  .map(makeObfuscatedWordRegex)
+  .filter(Boolean);
+
+const THREAT_PHRASES = [
+  "kill you",
+  "hurt you",
+  "i will kill",
+  "i will hurt",
+  "going to kill",
+  "going to hurt"
+].map((p) => {
+  const safe = escapeRegex(p).replace(/\s+/g, "\\s+");
+  return new RegExp(`\\b${safe}\\b`, "i");
+});
+
+function detectToxicityEnhanced(subject, feedbackText) {
+  const base = _detectToxicityOriginal(subject, feedbackText);
+
+  const raw = `${String(subject || "")} ${String(feedbackText || "")}`;
+  const norm = normalizeForModeration(raw);
+
+  const hits = new Set();
+
+  for (const kw of TOXIC_KEYWORDS) {
+    const k = normalizeForModeration(kw);
+    if (!k) continue;
+    if (k.includes(" ")) {
+      if (norm.includes(k)) hits.add(kw);
+      continue;
+    }
+    const re = new RegExp(`\\b${escapeRegex(k)}\\b`, "i");
+    if (re.test(norm)) hits.add(kw);
+  }
+
+  for (const re of PROFANITY_REGEXES) {
+    if (re.test(norm)) hits.add("profanity");
+  }
+
+  for (const re of THREAT_PHRASES) {
+    if (re.test(norm)) hits.add("threat");
+  }
+
+  if (/\bass\b/i.test(norm)) hits.add("ass");
+
+  const allHits = Array.from(hits);
+  const toxic = base.toxic || allHits.length > 0;
+  const reason = toxic
+    ? (allHits.length
+        ? ("Matched rules: " + allHits.slice(0, 8).join(", "))
+        : (base.reason || "Matched keywords"))
+    : "";
+
+  return { toxic, reason };
+}
+
+const _detectToxicityOriginal = detectToxicity;
+detectToxicity = detectToxicityEnhanced;
+
 function normalizeText(s) {
   return String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
@@ -526,7 +647,7 @@ app.post("/api/duplicates/merge", requireAuth, requireRole("manager"), async (re
   }
 });
 
-// Manually trigger a rescan (optional)
+// Manually trigger a rescan 
 app.post("/api/duplicates/scan", requireAuth, requireRole("manager"), async (req, res) => {
   const { limit } = req.body || {};
   const n = Math.min(Math.max(parseInt(limit || 50, 10), 1), 200);
