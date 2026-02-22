@@ -1,0 +1,88 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\shuei\\source\\repos\\Captain24k\\cis-capstone-group7\\ProjectTemplate\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{259A06F5-E8C4-4730-AC3C-F3118159CBD7}|ProjectTemplate\\ProjectTemplate.csproj|c:\\users\\shuei\\source\\repos\\captain24k\\cis-capstone-group7\\projecttemplate\\projecttemplate\\manager.html||{40D31677-CBC0-4297-A9EF-89D907823A98}",
+      "RelativeMoniker": "D:0:0:{259A06F5-E8C4-4730-AC3C-F3118159CBD7}|ProjectTemplate\\ProjectTemplate.csproj|solutionrelative:projecttemplate\\manager.html||{40D31677-CBC0-4297-A9EF-89D907823A98}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{259A06F5-E8C4-4730-AC3C-F3118159CBD7}|ProjectTemplate\\ProjectTemplate.csproj|C:\\Users\\shuei\\source\\repos\\Captain24k\\cis-capstone-group7\\ProjectTemplate\\projecttemplate\\projectservices.asmx.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{259A06F5-E8C4-4730-AC3C-F3118159CBD7}|ProjectTemplate\\ProjectTemplate.csproj|solutionrelative:projecttemplate\\projectservices.asmx.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{259A06F5-E8C4-4730-AC3C-F3118159CBD7}|ProjectTemplate\\ProjectTemplate.csproj|c:\\users\\shuei\\source\\repos\\captain24k\\cis-capstone-group7\\projecttemplate\\projecttemplate\\employee.html||{40D31677-CBC0-4297-A9EF-89D907823A98}",
+      "RelativeMoniker": "D:0:0:{259A06F5-E8C4-4730-AC3C-F3118159CBD7}|ProjectTemplate\\ProjectTemplate.csproj|solutionrelative:projecttemplate\\employee.html||{40D31677-CBC0-4297-A9EF-89D907823A98}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{259A06F5-E8C4-4730-AC3C-F3118159CBD7}|ProjectTemplate\\ProjectTemplate.csproj|c:\\users\\shuei\\source\\repos\\captain24k\\cis-capstone-group7\\projecttemplate\\projecttemplate\\index.html||{40D31677-CBC0-4297-A9EF-89D907823A98}",
+      "RelativeMoniker": "D:0:0:{259A06F5-E8C4-4730-AC3C-F3118159CBD7}|ProjectTemplate\\ProjectTemplate.csproj|solutionrelative:projecttemplate\\index.html||{40D31677-CBC0-4297-A9EF-89D907823A98}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "manager.html",
+              "DocumentMoniker": "C:\\Users\\shuei\\source\\repos\\Captain24k\\cis-capstone-group7\\ProjectTemplate\\ProjectTemplate\\manager.html",
+              "RelativeDocumentMoniker": "ProjectTemplate\\manager.html",
+              "ToolTip": "C:\\Users\\shuei\\source\\repos\\Captain24k\\cis-capstone-group7\\ProjectTemplate\\ProjectTemplate\\manager.html",
+              "RelativeToolTip": "ProjectTemplate\\manager.html",
+              "ViewState": "AgIAAH8AAAAAAAAAAAAuwJgAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001512|",
+              "WhenOpened": "2026-02-11T09:10:51.778Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "employee.html",
+              "DocumentMoniker": "C:\\Users\\shuei\\source\\repos\\Captain24k\\cis-capstone-group7\\ProjectTemplate\\ProjectTemplate\\employee.html",
+              "RelativeDocumentMoniker": "ProjectTemplate\\employee.html",
+              "ToolTip": "C:\\Users\\shuei\\source\\repos\\Captain24k\\cis-capstone-group7\\ProjectTemplate\\ProjectTemplate\\employee.html",
+              "RelativeToolTip": "ProjectTemplate\\employee.html",
+              "ViewState": "AgIAAI0AAAAAAAAAAAAuwJgAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001512|",
+              "WhenOpened": "2026-02-11T08:58:23.728Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "ProjectServices.asmx.cs",
+              "DocumentMoniker": "C:\\Users\\shuei\\source\\repos\\Captain24k\\cis-capstone-group7\\ProjectTemplate\\ProjectTemplate\\ProjectServices.asmx.cs",
+              "RelativeDocumentMoniker": "ProjectTemplate\\ProjectServices.asmx.cs",
+              "ToolTip": "C:\\Users\\shuei\\source\\repos\\Captain24k\\cis-capstone-group7\\ProjectTemplate\\ProjectTemplate\\ProjectServices.asmx.cs",
+              "RelativeToolTip": "ProjectTemplate\\ProjectServices.asmx.cs",
+              "ViewState": "AgIAAGsAAAAAAAAAAAAUwHkAAAAJAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-02-11T07:45:30.659Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "index.html",
+              "DocumentMoniker": "C:\\Users\\shuei\\source\\repos\\Captain24k\\cis-capstone-group7\\ProjectTemplate\\ProjectTemplate\\index.html",
+              "RelativeDocumentMoniker": "ProjectTemplate\\index.html",
+              "ToolTip": "C:\\Users\\shuei\\source\\repos\\Captain24k\\cis-capstone-group7\\ProjectTemplate\\ProjectTemplate\\index.html",
+              "RelativeToolTip": "ProjectTemplate\\index.html",
+              "ViewState": "AgIAAC0AAAAAAAAAAAAuwEAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001512|",
+              "WhenOpened": "2026-02-11T06:58:02.306Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
