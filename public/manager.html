@@ -1,998 +1,711 @@
 <!DOCTYPE html>
 <html>
 <head>
-	<meta charset="utf-8" />
-	<title>Manager Dashboard</title>
-
-	<style>
-		body { font-family: Arial; background:#f4f4f4; margin:0; }
-		.box { width:860px; margin:40px auto; background:#fff; padding:20px; border:1px solid #ddd; border-radius:6px; }
-		h2 { margin-top:0; }
-		button { margin-top:10px; padding:8px 12px; border:none; border-radius:4px; cursor:pointer; margin-right:8px; }
-		.primary { background:#2d7ef7; color:#fff; }
-		.dark { background:#444; color:#fff; }
-		.note { font-size:12px; color:#555; margin-bottom:10px; }
-		#msg { margin-top:12px; min-height:18px; font-size:14px; }
-
-		/* Tabs */
-		.tabs { display:flex; gap:8px; margin:10px 0 12px 0; }
-		.tab { padding:8px 12px; border-radius:4px; border:1px solid #ccc; background:#fafafa; cursor:pointer; }
-		.tab.active { background:#2d7ef7; border-color:#2d7ef7; color:#fff; }
-		.pill { display:inline-block; font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid #ddd; background:#f2f2f2; }
-		.smallBtn { padding:6px 10px; font-size:12px; }
-
-		.controls { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-top:10px; }
-		.control { display:flex; flex-direction:column; gap:6px; }
-		label { font-size:12px; color:#333; font-weight:bold; }
-		select, input {
-			padding:8px;
-			border:1px solid #bbb;
-			border-radius:4px;
-			font-size:14px;
-			min-width:200px;
-		}
-
-		table { border-collapse:collapse; width:100%; margin-top:15px; }
-		th, td { border:1px solid #ccc; padding:8px; text-align:left; font-size:13px; vertical-align:top; }
-		th { background:#eee; }
-
-		#tableHolder { max-height:400px; overflow-y:auto; }
-
-		tr.clickable { cursor:pointer; }
-		tr.clickable:hover { background:#f5f5f5; }
-
-		.detailPanel { border:1px solid #ccc; border-radius:6px; padding:16px; margin-top:12px; background:#fafafa; display:none; }
-		.detailPanel h3 { margin:0 0 8px 0; }
-		.detailPanel .meta { font-size:12px; color:#666; margin-bottom:8px; }
-		.detailPanel .text { white-space:pre-wrap; }
-	
-		td.wrap { white-space: pre-wrap; word-break: break-word; max-width: 420px; }
-	</style>
-
-	<script>
-		var ALL_FEEDBACK = [];
-		var FLAGGED_LIST = [];
-		var AUTO_TIMER = null;
-
-		function showMsg(text, color) {
-			var msg = document.getElementById("msg");
-			msg.style.color = color || "red";
-			msg.innerText = text || "";
-		}
-
-		function apiBase() {
-			return window.location.origin;
-		}
-
-		function getToken() {
-			return localStorage.getItem("token") || "";
-		}
-
-		function forceLogout(message) {
-			localStorage.removeItem("role");
-			localStorage.removeItem("token");
-			if (message) alert(message);
-			window.location.href = "index.html";
-		}
-
-		async function safeJsonOrText(res) {
-			var ct = (res.headers.get("content-type") || "").toLowerCase();
-			try {
-				if (ct.indexOf("application/json") !== -1) {
-					return await res.json();
-				}
-				var txt = await res.text();
-				return { ok: res.ok, message: txt || ("HTTP " + res.status) };
-			} catch {
-				return { ok: res.ok, message: "Response parse error (HTTP " + res.status + ")" };
-			}
-		}
-
-		async function apiFetch(path, options) {
-			var controller = new AbortController();
-			var t = setTimeout(function () { controller.abort(); }, 10000);
-
-			try {
-				var res = await fetch(apiBase() + path, Object.assign({}, options || {}, { signal: controller.signal }));
-				var data = await safeJsonOrText(res);
-				return { res: res, data: data };
-			} finally {
-				clearTimeout(t);
-			}
-		}
-
-		function ShowTab(which) {
-			document.getElementById("tabReports").classList.remove("active");
-			document.getElementById("tabModeration").classList.remove("active");
-			document.getElementById("panelReports").style.display = "none";
-			document.getElementById("panelModeration").style.display = "none";
-			HideDetail();
-
-			if (which === "moderation") {
-				document.getElementById("tabModeration").classList.add("active");
-				document.getElementById("panelModeration").style.display = "block";
-				LoadFlaggedQueue();
-			} else {
-				document.getElementById("tabReports").classList.add("active");
-				document.getElementById("panelReports").style.display = "block";
-				LoadFeedbackForManager();
-			}
-		}
-
-		async function LoadFlaggedQueue() {
-			var holder = document.getElementById("flaggedHolder");
-			holder.innerHTML = "";
-			showMsg("");
-
-			var token = getToken();
-			if (!token) { forceLogout("Missing token. Please login again."); return; }
-
-			try {
-				var result = await apiFetch("/api/moderation/flagged", {
-					method: "GET",
-					headers: { "Authorization": "Bearer " + token }
-				});
-
-				if (result.res.status === 401) { forceLogout("Session expired. Please login again."); return; }
-				if (result.res.status === 403) { forceLogout("Forbidden. You are not a manager account."); return; }
-
-				var data = result.data || {};
-				if (!result.res.ok || !data.ok) {
-					showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
-					return;
-				}
-
-				var list = data.data || [];
-				FLAGGED_LIST = list;
-				RenderFlagged(list);
-				if (list.length === 0) showMsg("No flagged submissions right now.", "green");
-				else showMsg("Flagged queue: " + list.length + " item(s).", "green");
-			} catch (e) {
-				if (e && e.name === "AbortError") { showMsg("Request timed out. Is the Node server running?", "red"); return; }
-				showMsg("Connection error: " + (e && e.message ? e.message : "Unknown error"), "red");
-			}
-		}
-
-		function RenderFlagged(list) {
-			var holder = document.getElementById("flaggedHolder");
-			if (!list || list.length === 0) { holder.innerHTML = ""; return; }
-
-			var html = "<table>";
-			html += "<tr><th>Date</th><th>Department</th><th>Category</th><th>Subject</th><th>Feedback</th><th>Reason</th><th>Action</th></tr>";
-
-			for (var i = 0; i < list.length; i++) {
-				var x = list[i];
-				var id = Number(x.feedback_id || 0);
-				html += "<tr class=\"clickable\" onclick=\"ShowFlaggedDetail(" + id + ")\">";
-				html += "<td>" + EscapeHtml(String(x.created_at || "")) + "</td>";
-				html += "<td>" + EscapeHtml(String(x.department || "")) + "</td>";
-				html += "<td>" + EscapeHtml(String(x.category || "")) + "</td>";
-				html += "<td>" + EscapeHtml(String(x.subject || "")) + "</td>";
-				html += "<td class=\"wrap\">" + EscapeHtml(String(x.feedback_text || "")) + "</td>";
-				html += "<td>" + EscapeHtml(String(x.reason || x.moderation_reason || "")) + "</td>";
-				html += "<td>";
-				html += "<button class='primary smallBtn' onclick='event.stopPropagation();ApproveFlagged(" + id + ")'>Approve</button>";
-				html += "<button class='dark smallBtn' onclick='event.stopPropagation();RejectFlagged(" + id + ")'>Reject</button>";
-				html += "</td>";
-				html += "</tr>";
-			}
-
-			html += "</table>";
-			holder.innerHTML = html;
-		}
-
-		
-		function ShowFlaggedDetail(id){
-			var panel = document.getElementById("flaggedDetailPanel");
-			var subj = document.getElementById("flaggedDetailSubject");
-			var meta = document.getElementById("flaggedDetailMeta");
-			var text = document.getElementById("flaggedDetailText");
-			if(!panel) return;
-
-			var item = null;
-			for(var i=0;i<(FLAGGED_LIST||[]).length;i++){
-				if(Number(FLAGGED_LIST[i].feedback_id)===Number(id)){ item = FLAGGED_LIST[i]; break; }
-			}
-			if(!item){ panel.style.display="none"; return; }
-
-			subj.innerText = item.subject || "";
-			meta.innerText =
-				(String(item.created_at||"") + " • " + String(item.department||"") + " • " + String(item.category||"") + 
-				 " • upvotes: " + String(item.upvotes||0) + " • reason: " + String(item.reason||item.moderation_reason||""));
-			text.innerText = item.feedback_text || "";
-			panel.style.display="block";
-		}
-async function ApproveFlagged(id) {
-			if (!confirm("Approve this submission? It will become visible to employees.")) return;
-			var token = getToken();
-			try {
-				var result = await apiFetch("/api/moderation/" + id + "/approve", {
-					method: "POST",
-					headers: { "Authorization": "Bearer " + token }
-				});
-				var data = result.data || {};
-				if (!result.res.ok || !data.ok) {
-					showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
-					return;
-				}
-				showMsg("Approved.", "green");
-				LoadFlaggedQueue();
-				// Refresh reports list too
-				LoadFeedbackForManager();
-			} catch (e) {
-				showMsg("Connection error.", "red");
-			}
-		}
-
-		async function RejectFlagged(id) {
-			if (!confirm("Reject this submission? It will stay hidden.")) return;
-			var token = getToken();
-			try {
-				var result = await apiFetch("/api/moderation/" + id + "/reject", {
-					method: "POST",
-					headers: { "Authorization": "Bearer " + token }
-				});
-				var data = result.data || {};
-				if (!result.res.ok || !data.ok) {
-					showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
-					return;
-				}
-				showMsg("Rejected.", "green");
-				LoadFlaggedQueue();
-				LoadFeedbackForManager();
-			} catch (e) {
-				showMsg("Connection error.", "red");
-			}
-		}
-
-		window.onload = function () {
-			if (window.location.protocol === "file:") {
-				showMsg("Open this page through the Node server (example: http://localhost:3000), not by double-clicking the file.", "red");
-				return;
-			}
-
-			var role = localStorage.getItem("role");
-			var token = getToken();
-
-			if (!token || role !== "manager") {
-				window.location.href = "index.html";
-				return;
-			}
-
-			ShowTab("reports");
-
-			// Auto-refresh, but avoid stacking multiple intervals if page reloads oddly
-			if (AUTO_TIMER) clearInterval(AUTO_TIMER);
-			AUTO_TIMER = setInterval(function(){
-				// only refresh reports if the reports tab is active
-				var rep = document.getElementById('panelReports');
-				if (rep && rep.style.display !== 'none') LoadFeedbackForManager();
-			}, 30000);
-		};
-
-		function Logout() {
-			forceLogout();
-		}
-
-		async function LoadFeedbackForManager() {
-			var holder = document.getElementById("tableHolder");
-			holder.innerHTML = "";
-			showMsg("");
-
-			var token = getToken();
-			if (!token) {
-				forceLogout("Missing token. Please login again.");
-				return;
-			}
-
-			try {
-				var result = await apiFetch("/api/feedback", {
-					method: "GET",
-					headers: { "Authorization": "Bearer " + token }
-				});
-
-				// Handle auth failures clearly (often misread as “connection error”)
-				if (result.res.status === 401) {
-					forceLogout("Session expired. Please login again.");
-					return;
-				}
-				if (result.res.status === 403) {
-					forceLogout("Forbidden. You are not a manager account.");
-					return;
-				}
-
-				var data = result.data || {};
-				if (!result.res.ok || !data.ok) {
-					showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
-					return;
-				}
-
-				ALL_FEEDBACK = data.data || [];
-
-				BuildDepartmentFilter(ALL_FEEDBACK);
-				BuildCategoryFilter(ALL_FEEDBACK);
-
-				if (ALL_FEEDBACK.length === 0) {
-					RenderTable([]);
-					HideDetail();
-					showMsg("No feedback found yet.", "red");
-					return;
-				}
-
-				RenderFromControls();
-				showMsg("Loaded " + ALL_FEEDBACK.length + " feedback item(s).", "green");
-			} catch (e) {
-				if (e && e.name === "AbortError") {
-					showMsg("Request timed out. Is the Node server running?", "red");
-					return;
-				}
-				showMsg("Connection error: " + (e && e.message ? e.message : "Unknown error"), "red");
-			}
-		}
-
-		function BuildDepartmentFilter(list) {
-			var ddl = document.getElementById("ddlDepartmentFilter");
-			var current = ddl.value || "ALL";
-
-			var depts = {};
-			for (var i = 0; i < list.length; i++) {
-				var d = (list[i].department || "").trim();
-				if (d) depts[d] = true;
-			}
-
-			var keys = Object.keys(depts).sort();
-			var html = '<option value="ALL">All Departments</option>';
-			for (var j = 0; j < keys.length; j++) {
-				html += '<option value="' + EscapeHtml(keys[j]) + '">' + EscapeHtml(keys[j]) + '</option>';
-			}
-			ddl.innerHTML = html;
-
-			// restore selection if still exists
-			var opts = ddl.options;
-			var found = false;
-			for (var k = 0; k < opts.length; k++) {
-				if (opts[k].value === current) found = true;
-			}
-			ddl.value = found ? current : "ALL";
-		}
-
-		function BuildCategoryFilter(list) {
-			var ddl = document.getElementById("ddlCategoryFilter");
-			var current = ddl.value || "ALL";
-
-			var cats = {};
-			for (var i = 0; i < list.length; i++) {
-				var c = (list[i].category || "").trim();
-				if (c) cats[c] = true;
-			}
-
-			var keys = Object.keys(cats).sort();
-			var html = '<option value="ALL">All Categories</option>';
-			for (var j = 0; j < keys.length; j++) {
-				html += '<option value="' + EscapeHtml(keys[j]) + '">' + EscapeHtml(keys[j]) + '</option>';
-			}
-			ddl.innerHTML = html;
-
-			// restore selection if still exists
-			var opts = ddl.options;
-			var found = false;
-			for (var k = 0; k < opts.length; k++) {
-				if (opts[k].value === current) found = true;
-			}
-			ddl.value = found ? current : "ALL";
-		}
-
-		function RenderFromControls() {
-			var dept = document.getElementById("ddlDepartmentFilter").value;
-			var cat = document.getElementById("ddlCategoryFilter").value;
-			var sort = document.getElementById("ddlSort").value;
-
-			var list = ALL_FEEDBACK.slice(0);
-
-			// FILTER by department
-			if (dept !== "ALL") {
-				list = list.filter(function (x) {
-					return String(x.department || "") === dept;
-				});
-			}
-
-			// FILTER by category
-			if (cat !== "ALL") {
-				list = list.filter(function (x) {
-					return String(x.category || "") === cat;
-				});
-			}
-
-			// SORT
-			list.sort(function (a, b) {
-				var av = Number(a.upvotes || 0);
-				var bv = Number(b.upvotes || 0);
-
-				var ad = new Date(a.created_at || 0).getTime();
-				var bd = new Date(b.created_at || 0).getTime();
-
-				if (sort === "MOST_UPVOTED") {
-					if (bv !== av) return bv - av;
-					return bd - ad;
-				}
-				if (sort === "NEWEST") return bd - ad;
-				if (sort === "OLDEST") return ad - bd;
-
-				return bd - ad;
-			});
-
-			RenderTable(list);
-
-			showMsg("Showing " + list.length + " of " + ALL_FEEDBACK.length + " report(s).", "green");
-		}
-
-		function RenderTable(list) {
-			var holder = document.getElementById("tableHolder");
-
-			if (!list || list.length === 0) {
-				holder.innerHTML = "";
-				return;
-			}
-
-			var html = "<table>";
-			html += "<tr><th>Date</th><th>Department</th><th>Category</th><th>Subject</th><th>Feedback</th><th>Upvotes</th></tr>";
-
-			for (var i = 0; i < list.length; i++) {
-				var id = Number(list[i].feedback_id || 0);
-				html += '<tr class="clickable" onclick="ShowDetail(' + id + ')">';
-				html += "<td>" + EscapeHtml(String(list[i].created_at || "")) + "</td>";
-				html += "<td>" + EscapeHtml(String(list[i].department || "")) + "</td>";
-				html += "<td>" + EscapeHtml(String(list[i].category || "")) + "</td>";
-				html += "<td>" + EscapeHtml(String(list[i].subject || "")) + "</td>";
-				html += "<td>" + EscapeHtml(String(list[i].feedback_text || "")) + "</td>";
-				html += "<td>" + EscapeHtml(String(list[i].upvotes || 0)) + "</td>";
-				html += "</tr>";
-			}
-
-			html += "</table>";
-			holder.innerHTML = html;
-		}
-
-		async function ClearAllFeedback() {
-			var token = getToken();
-			if (!token) {
-				forceLogout("Missing token. Please login again.");
-				return;
-			}
-
-			showMsg("");
-
-			try {
-				var result = await apiFetch("/api/feedback", {
-					method: "DELETE",
-					headers: { "Authorization": "Bearer " + token }
-				});
-
-				if (result.res.status === 401) { forceLogout("Session expired. Please login again."); return; }
-				if (result.res.status === 403) { forceLogout("Forbidden. You are not a manager account."); return; }
-
-				var data = result.data || {};
-				if (!result.res.ok || !data.ok) {
-					showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
-					return;
-				}
-
-				ALL_FEEDBACK = [];
-				document.getElementById("tableHolder").innerHTML = "";
-				BuildDepartmentFilter([]);
-				BuildCategoryFilter([]);
-				HideDetail();
-				showMsg(data.message || "All feedback cleared.", "green");
-			} catch (e) {
-				if (e && e.name === "AbortError") {
-					showMsg("Request timed out. Is the Node server running?", "red");
-					return;
-				}
-				showMsg("Connection error: " + (e && e.message ? e.message : "Unknown error"), "red");
-			}
-		}
-
-		function ShowDetail(id) {
-			var panel = document.getElementById("detailPanel");
-			var item = null;
-
-			for (var i = 0; i < ALL_FEEDBACK.length; i++) {
-				if (Number(ALL_FEEDBACK[i].feedback_id) === Number(id)) {
-					item = ALL_FEEDBACK[i];
-					break;
-				}
-			}
-
-			if (!item) { HideDetail(); return; }
-
-			document.getElementById("detailSubject").innerText = item.subject || "";
-			document.getElementById("detailMeta").innerText =
-				(item.created_at || "") + " • " +
-				(item.department || "") + " • " +
-				(item.category || "") + " • " +
-				(item.upvotes || 0) + " upvote(s)";
-
-			document.getElementById("detailText").innerText = item.feedback_text || "";
-			panel.style.display = "block";
-		}
-
-		function HideDetail() {
-			var panel = document.getElementById("detailPanel");
-			if (panel) panel.style.display = "none";
-		}
-
-		function EscapeHtml(s) {
-			return String(s)
-				.replace(/&/g, "&amp;")
-				.replace(/</g, "&lt;")
-				.replace(/>/g, "&gt;")
-				.replace(/"/g, "&quot;")
-				.replace(/'/g, "&#039;");
-		}
-	</script>
+    <meta charset="utf-8" />
+    <title>Manager Dashboard</title>
+
+    <style>
+        body {
+            font-family: Arial;
+            background: #f4f4f4;
+            margin: 0;
+        }
+
+        .box {
+            width: 960px;
+            margin: 40px auto;
+            background: #fff;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        button {
+            margin-top: 10px;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 8px;
+        }
+
+        .primary {
+            background: #2d7ef7;
+            color: #fff;
+        }
+
+        .dark {
+            background: #444;
+            color: #fff;
+        }
+
+        .note {
+            font-size: 12px;
+            color: #555;
+            margin-bottom: 10px;
+        }
+
+        #msg {
+            margin-top: 12px;
+            min-height: 18px;
+            font-size: 14px;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin: 10px 0 12px 0;
+        }
+
+        .tab {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            background: #fafafa;
+            cursor: pointer;
+        }
+
+            .tab.active {
+                background: #2d7ef7;
+                border-color: #2d7ef7;
+                color: #fff;
+            }
+
+        .smallBtn {
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            margin-top: 10px;
+        }
+
+        .control {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        label {
+            font-size: 12px;
+            color: #333;
+            font-weight: bold;
+        }
+
+        select, input, textarea {
+            padding: 8px;
+            border: 1px solid #bbb;
+            border-radius: 4px;
+            font-size: 14px;
+            min-width: 200px;
+            box-sizing: border-box;
+        }
+
+        textarea {
+            width: 100%;
+            min-width: 320px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 15px;
+        }
+
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+            font-size: 13px;
+            vertical-align: top;
+        }
+
+        th {
+            background: #eee;
+        }
+
+        #tableHolder {
+            max-height: 420px;
+            overflow-y: auto;
+        }
+
+        tr.clickable {
+            cursor: pointer;
+        }
+
+            tr.clickable:hover {
+                background: #f5f5f5;
+            }
+
+        .detailPanel {
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            padding: 16px;
+            margin-top: 12px;
+            background: #fafafa;
+            display: none;
+        }
+
+            .detailPanel h3 {
+                margin: 0 0 8px 0;
+            }
+
+            .detailPanel .meta {
+                font-size: 12px;
+                color: #666;
+                margin-bottom: 8px;
+            }
+
+            .detailPanel .text {
+                white-space: pre-wrap;
+                margin-bottom: 12px;
+            }
+
+        .row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+            .row > div {
+                flex: 1;
+                min-width: 260px;
+            }
+
+        td.wrap {
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-width: 420px;
+        }
+    </style>
+
+    <script>
+        var ALL_FEEDBACK = [];
+        var FLAGGED_LIST = [];
+        var AUTO_TIMER = null;
+        var SELECTED_ID = null;
+
+        function showMsg(text, color) {
+            var msg = document.getElementById("msg");
+            msg.style.color = color || "red";
+            msg.innerText = text || "";
+        }
+
+        function apiBase() { return window.location.origin; }
+
+        function getToken() { return localStorage.getItem("token") || ""; }
+
+        function forceLogout(message) {
+            localStorage.removeItem("role");
+            localStorage.removeItem("token");
+            if (message) alert(message);
+            window.location.href = "index.html";
+        }
+
+        async function safeJsonOrText(res) {
+            var ct = (res.headers.get("content-type") || "").toLowerCase();
+            try {
+                if (ct.indexOf("application/json") !== -1) return await res.json();
+                var txt = await res.text();
+                return { ok: res.ok, message: txt || ("HTTP " + res.status) };
+            } catch {
+                return { ok: res.ok, message: "Response parse error (HTTP " + res.status + ")" };
+            }
+        }
+
+        async function apiFetch(path, options) {
+            var controller = new AbortController();
+            var t = setTimeout(function () { controller.abort(); }, 10000);
+            try {
+                var res = await fetch(apiBase() + path, Object.assign({}, options || {}, { signal: controller.signal }));
+                var data = await safeJsonOrText(res);
+                return { res: res, data: data };
+            } finally {
+                clearTimeout(t);
+            }
+        }
+
+        function ShowTab(which) {
+            document.getElementById("tabReports").classList.remove("active");
+            document.getElementById("tabModeration").classList.remove("active");
+            document.getElementById("panelReports").style.display = "none";
+            document.getElementById("panelModeration").style.display = "none";
+            HideDetail();
+
+            if (which === "moderation") {
+                document.getElementById("tabModeration").classList.add("active");
+                document.getElementById("panelModeration").style.display = "block";
+                LoadFlaggedQueue();
+            } else {
+                document.getElementById("tabReports").classList.add("active");
+                document.getElementById("panelReports").style.display = "block";
+                LoadFeedbackForManager();
+            }
+        }
+
+        // -------- MODERATION --------
+        async function LoadFlaggedQueue() {
+            var holder = document.getElementById("flaggedHolder");
+            holder.innerHTML = "";
+            showMsg("");
+
+            var token = getToken();
+            if (!token) { forceLogout("Missing token. Please login again."); return; }
+
+            try {
+                var result = await apiFetch("/api/moderation/flagged", {
+                    method: "GET",
+                    headers: { "Authorization": "Bearer " + token }
+                });
+
+                if (result.res.status === 401) { forceLogout("Session expired. Please login again."); return; }
+                if (result.res.status === 403) { forceLogout("Forbidden. You are not a manager account."); return; }
+
+                var data = result.data || {};
+                if (!result.res.ok || !data.ok) {
+                    showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
+                    return;
+                }
+
+                FLAGGED_LIST = data.data || [];
+                RenderFlagged(FLAGGED_LIST);
+
+                if (FLAGGED_LIST.length === 0) showMsg("No flagged submissions right now.", "green");
+                else showMsg("Flagged queue: " + FLAGGED_LIST.length + " item(s).", "green");
+            } catch (e) {
+                if (e && e.name === "AbortError") { showMsg("Request timed out. Is the Node server running?", "red"); return; }
+                showMsg("Connection error.", "red");
+            }
+        }
+
+        function RenderFlagged(list) {
+            var holder = document.getElementById("flaggedHolder");
+            if (!list || list.length === 0) { holder.innerHTML = ""; return; }
+
+            var html = "<table>";
+            html += "<tr><th>Date</th><th>Department</th><th>Category</th><th>Subject</th><th>Feedback</th><th>Reason</th><th>Action</th></tr>";
+
+            for (var i = 0; i < list.length; i++) {
+                var x = list[i];
+                var id = Number(x.feedback_id || 0);
+                html += "<tr>";
+                html += "<td>" + EscapeHtml(String(x.created_at || "")) + "</td>";
+                html += "<td>" + EscapeHtml(String(x.department || "")) + "</td>";
+                html += "<td>" + EscapeHtml(String(x.category || "")) + "</td>";
+                html += "<td>" + EscapeHtml(String(x.subject || "")) + "</td>";
+                html += "<td class=\"wrap\">" + EscapeHtml(String(x.feedback_text || "")) + "</td>";
+                html += "<td>" + EscapeHtml(String(x.reason || x.moderation_reason || "")) + "</td>";
+                html += "<td>";
+                html += "<button class='primary smallBtn' onclick='ApproveFlagged(" + id + ")'>Approve</button>";
+                html += "<button class='dark smallBtn' onclick='RejectFlagged(" + id + ")'>Reject</button>";
+                html += "</td>";
+                html += "</tr>";
+            }
+
+            html += "</table>";
+            holder.innerHTML = html;
+        }
+
+        async function ApproveFlagged(id) {
+            if (!confirm("Approve this submission? It will become visible to employees.")) return;
+            var token = getToken();
+            try {
+                var result = await apiFetch("/api/moderation/" + id + "/approve", {
+                    method: "POST",
+                    headers: { "Authorization": "Bearer " + token }
+                });
+                var data = result.data || {};
+                if (!result.res.ok || !data.ok) {
+                    showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
+                    return;
+                }
+                showMsg("Approved.", "green");
+                LoadFlaggedQueue();
+                LoadFeedbackForManager();
+            } catch (e) { showMsg("Connection error.", "red"); }
+        }
+
+        async function RejectFlagged(id) {
+            if (!confirm("Reject this submission? It will stay hidden.")) return;
+            var token = getToken();
+            try {
+                var result = await apiFetch("/api/moderation/" + id + "/reject", {
+                    method: "POST",
+                    headers: { "Authorization": "Bearer " + token }
+                });
+                var data = result.data || {};
+                if (!result.res.ok || !data.ok) {
+                    showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
+                    return;
+                }
+                showMsg("Rejected.", "green");
+                LoadFlaggedQueue();
+                LoadFeedbackForManager();
+            } catch (e) { showMsg("Connection error.", "red"); }
+        }
+
+        // -------- REPORTS + STATUS/RESPONSE --------
+        window.onload = function () {
+            if (window.location.protocol === "file:") {
+                showMsg("Open this page through the Node server (http://localhost:3000).", "red");
+                return;
+            }
+
+            var role = localStorage.getItem("role");
+            var token = getToken();
+
+            if (!token || role !== "manager") {
+                window.location.href = "index.html";
+                return;
+            }
+
+            ShowTab("reports");
+
+            if (AUTO_TIMER) clearInterval(AUTO_TIMER);
+            AUTO_TIMER = setInterval(function () {
+                var rep = document.getElementById('panelReports');
+                if (rep && rep.style.display !== 'none') LoadFeedbackForManager();
+            }, 30000);
+        };
+
+        function Logout() { forceLogout(); }
+
+        async function LoadFeedbackForManager() {
+            var holder = document.getElementById("tableHolder");
+            holder.innerHTML = "";
+            showMsg("");
+
+            var token = getToken();
+            if (!token) { forceLogout("Missing token. Please login again."); return; }
+
+            try {
+                var result = await apiFetch("/api/feedback", {
+                    method: "GET",
+                    headers: { "Authorization": "Bearer " + token }
+                });
+
+                if (result.res.status === 401) { forceLogout("Session expired. Please login again."); return; }
+                if (result.res.status === 403) { forceLogout("Forbidden. You are not a manager account."); return; }
+
+                var data = result.data || {};
+                if (!result.res.ok || !data.ok) {
+                    showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
+                    return;
+                }
+
+                ALL_FEEDBACK = data.data || [];
+
+                BuildDepartmentFilter(ALL_FEEDBACK);
+                BuildCategoryFilter(ALL_FEEDBACK);
+
+                if (ALL_FEEDBACK.length === 0) {
+                    RenderTable([]);
+                    HideDetail();
+                    showMsg("No feedback found yet.", "red");
+                    return;
+                }
+
+                RenderFromControls();
+                showMsg("Loaded " + ALL_FEEDBACK.length + " feedback item(s).", "green");
+            } catch (e) {
+                if (e && e.name === "AbortError") { showMsg("Request timed out. Is the Node server running?", "red"); return; }
+                showMsg("Connection error.", "red");
+            }
+        }
+
+        function BuildDepartmentFilter(list) {
+            var ddl = document.getElementById("ddlDepartmentFilter");
+            var current = ddl.value || "ALL";
+
+            var depts = {};
+            for (var i = 0; i < list.length; i++) {
+                var d = (list[i].department || "").trim();
+                if (d) depts[d] = true;
+            }
+
+            var keys = Object.keys(depts).sort();
+            var html = '<option value="ALL">All Departments</option>';
+            for (var j = 0; j < keys.length; j++) {
+                html += '<option value="' + EscapeHtml(keys[j]) + '">' + EscapeHtml(keys[j]) + '</option>';
+            }
+            ddl.innerHTML = html;
+
+            var opts = ddl.options;
+            var found = false;
+            for (var k = 0; k < opts.length; k++) if (opts[k].value === current) found = true;
+            ddl.value = found ? current : "ALL";
+        }
+
+        function BuildCategoryFilter(list) {
+            var ddl = document.getElementById("ddlCategoryFilter");
+            var current = ddl.value || "ALL";
+
+            var cats = {};
+            for (var i = 0; i < list.length; i++) {
+                var c = (list[i].category || "").trim();
+                if (c) cats[c] = true;
+            }
+
+            var keys = Object.keys(cats).sort();
+            var html = '<option value="ALL">All Categories</option>';
+            for (var j = 0; j < keys.length; j++) {
+                html += '<option value="' + EscapeHtml(keys[j]) + '">' + EscapeHtml(keys[j]) + '</option>';
+            }
+            ddl.innerHTML = html;
+
+            var opts = ddl.options;
+            var found = false;
+            for (var k = 0; k < opts.length; k++) if (opts[k].value === current) found = true;
+            ddl.value = found ? current : "ALL";
+        }
+
+        function RenderFromControls() {
+            var dept = document.getElementById("ddlDepartmentFilter").value;
+            var cat = document.getElementById("ddlCategoryFilter").value;
+            var sort = document.getElementById("ddlSort").value;
+
+            var list = ALL_FEEDBACK.slice(0);
+
+            if (dept !== "ALL") list = list.filter(x => String(x.department || "") === dept);
+            if (cat !== "ALL") list = list.filter(x => String(x.category || "") === cat);
+
+            list.sort(function (a, b) {
+                var av = Number(a.upvotes || 0);
+                var bv = Number(b.upvotes || 0);
+                var ad = new Date(a.created_at || 0).getTime();
+                var bd = new Date(b.created_at || 0).getTime();
+
+                if (sort === "MOST_UPVOTED") { if (bv !== av) return bv - av; return bd - ad; }
+                if (sort === "NEWEST") return bd - ad;
+                if (sort === "OLDEST") return ad - bd;
+                return bd - ad;
+            });
+
+            RenderTable(list);
+            showMsg("Showing " + list.length + " of " + ALL_FEEDBACK.length + " report(s).", "green");
+        }
+
+        function RenderTable(list) {
+            var holder = document.getElementById("tableHolder");
+            if (!list || list.length === 0) { holder.innerHTML = ""; return; }
+
+            var html = "<table>";
+            html += "<tr><th>Date</th><th>Department</th><th>Category</th><th>Subject</th><th>Status</th><th>Upvotes</th></tr>";
+
+            for (var i = 0; i < list.length; i++) {
+                var id = Number(list[i].feedback_id || 0);
+                html += '<tr class="clickable" onclick="ShowDetail(' + id + ')">';
+                html += "<td>" + EscapeHtml(String(list[i].created_at || "")) + "</td>";
+                html += "<td>" + EscapeHtml(String(list[i].department || "")) + "</td>";
+                html += "<td>" + EscapeHtml(String(list[i].category || "")) + "</td>";
+                html += "<td>" + EscapeHtml(String(list[i].subject || "")) + "</td>";
+                html += "<td>" + EscapeHtml(String(list[i].status || "Open")) + "</td>";
+                html += "<td>" + EscapeHtml(String(list[i].upvotes || 0)) + "</td>";
+                html += "</tr>";
+            }
+
+            html += "</table>";
+            holder.innerHTML = html;
+        }
+
+        async function ClearAllFeedback() {
+            var token = getToken();
+            if (!token) { forceLogout("Missing token. Please login again."); return; }
+            showMsg("");
+
+            try {
+                var result = await apiFetch("/api/feedback", {
+                    method: "DELETE",
+                    headers: { "Authorization": "Bearer " + token }
+                });
+
+                if (result.res.status === 401) { forceLogout("Session expired. Please login again."); return; }
+                if (result.res.status === 403) { forceLogout("Forbidden. You are not a manager account."); return; }
+
+                var data = result.data || {};
+                if (!result.res.ok || !data.ok) {
+                    showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
+                    return;
+                }
+
+                ALL_FEEDBACK = [];
+                document.getElementById("tableHolder").innerHTML = "";
+                BuildDepartmentFilter([]);
+                BuildCategoryFilter([]);
+                HideDetail();
+                showMsg(data.message || "All feedback cleared.", "green");
+            } catch (e) {
+                if (e && e.name === "AbortError") { showMsg("Request timed out. Is the Node server running?", "red"); return; }
+                showMsg("Connection error.", "red");
+            }
+        }
+
+        function ShowDetail(id) {
+            SELECTED_ID = id;
+
+            var panel = document.getElementById("detailPanel");
+            var item = null;
+            for (var i = 0; i < ALL_FEEDBACK.length; i++) {
+                if (Number(ALL_FEEDBACK[i].feedback_id) === Number(id)) { item = ALL_FEEDBACK[i]; break; }
+            }
+            if (!item) { HideDetail(); return; }
+
+            document.getElementById("detailSubject").innerText = item.subject || "";
+            document.getElementById("detailMeta").innerText =
+                (item.created_at || "") + " • " +
+                (item.department || "") + " • " +
+                (item.category || "") + " • " +
+                (item.upvotes || 0) + " upvote(s)";
+
+            document.getElementById("detailText").innerText = item.feedback_text || "";
+
+            document.getElementById("ddlStatus").value = (item.status || "Open");
+            document.getElementById("txtResponse").value = (item.manager_response || "");
+
+            document.getElementById("respMeta").innerText =
+                (item.responded_at ? ("Last response: " + item.responded_at) : "No response yet") +
+                (item.responded_by ? (" • by: " + item.responded_by) : "");
+
+            panel.style.display = "block";
+        }
+
+        function HideDetail() {
+            SELECTED_ID = null;
+            var panel = document.getElementById("detailPanel");
+            if (panel) panel.style.display = "none";
+        }
+
+        async function SaveStatusAndResponse() {
+            if (!SELECTED_ID) { showMsg("Click a row first.", "red"); return; }
+
+            var status = document.getElementById("ddlStatus").value;
+            var manager_response = document.getElementById("txtResponse").value.trim();
+            var token = getToken();
+            if (!token) { forceLogout("Missing token. Please login again."); return; }
+
+            showMsg("");
+
+            try {
+                var result = await apiFetch("/api/feedback/" + SELECTED_ID, {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": "Bearer " + token
+                    },
+                    body: JSON.stringify({ status: status, manager_response: manager_response })
+                });
+
+                var data = result.data || {};
+                if (!result.res.ok || !data.ok) {
+                    showMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
+                    return;
+                }
+
+                showMsg("Saved status/response.", "green");
+                await LoadFeedbackForManager();
+                setTimeout(function () { ShowDetail(SELECTED_ID); }, 0);
+            } catch (e) {
+                showMsg("Connection error.", "red");
+            }
+        }
+
+        function EscapeHtml(s) {
+            return String(s)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+    </script>
 </head>
 
 <body>
-	<div class="box">
-		<h2>Manager Dashboard</h2>
-
-		<div class="tabs">
-			<div id="tabReports" class="tab active" onclick="ShowTab('reports')">Reports</div>
-			<div id="tabModeration" class="tab" onclick="ShowTab('moderation')">Moderation Queue</div>
-			<div style="flex:1"></div>
-		</div>
-
-		<div id="panelReports">
-
-		<div class="controls">
-			<div class="control">
-				<label for="ddlDepartmentFilter">Department</label>
-				<select id="ddlDepartmentFilter" onchange="RenderFromControls()">
-					<option value="ALL">All Departments</option>
-				</select>
-			</div>
-
-			<div class="control">
-				<label for="ddlCategoryFilter">Category</label>
-				<select id="ddlCategoryFilter" onchange="RenderFromControls()">
-					<option value="ALL">All Categories</option>
-				</select>
-			</div>
-
-			<div class="control">
-				<label for="ddlSort">Sort</label>
-				<select id="ddlSort" onchange="RenderFromControls()">
-					<option value="MOST_UPVOTED">Most Upvoted</option>
-					<option value="NEWEST">Newest</option>
-					<option value="OLDEST">Oldest</option>
-				</select>
-			</div>
-
-			<div class="control">
-				<button class="primary" onclick="LoadFeedbackForManager()">Refresh</button>
-				<button class="dark" onclick="ClearAllFeedback()">Clear All</button>
-				<button class="dark" onclick="Logout()">Logout</button>
-			</div>
-		</div>
-
-		<div id="msg"></div>
-		<div id="tableHolder"></div>
-
-		<div id="detailPanel" class="detailPanel">
-			<h3 id="detailSubject"></h3>
-			<div id="detailMeta" class="meta"></div>
-			<div id="detailText" class="text"></div>
-		</div>
-		</div> <!-- end panelReports -->
-
-		<div id="panelModeration" style="display:none;">
-			<p class="note">Flagged submissions are hidden from employees until you approve them.</p>
-			<button class="primary" onclick="LoadFlaggedQueue()">Refresh Flagged Queue</button>
-			<div id="flaggedHolder" style="margin-top:12px;"></div>
-		</div>
-	</div>
-
-<!-- Duplicate Feedback Merging -->
-<script>
-(function(){
-  function el(tag, attrs, html){
-    var e = document.createElement(tag);
-    attrs = attrs || {};
-    Object.keys(attrs).forEach(function(k){
-      if(k === "class") e.className = attrs[k];
-      else if(k === "style") e.style.cssText = attrs[k];
-      else e.setAttribute(k, attrs[k]);
-    });
-    if (html != null) e.innerHTML = html;
-    return e;
-  }
-
-  function ensureDuplicatesTab(){
-    var tabs = document.querySelector(".tabs");
-    if(!tabs) return;
-
-    if(document.getElementById("tabDuplicates")) return; // already added
-
-    var btn = el("div", { id:"tabDuplicates", class:"tab" }, "Duplicates");
-    btn.onclick = function(){ ShowTab("duplicates"); };
-    tabs.appendChild(btn);
-
-    var box = document.querySelector(".box");
-    if(!box) return;
-
-    var panel = el("div", { id:"panelDuplicates", style:"display:none;" });
-
-    panel.appendChild(el("div", { class:"note" },
-      "Shows potential duplicate feedback (same category + keyword overlap). " +
-      "Use Merge to combine upvotes into the earliest submission, and hide the duplicate from employees."
-    ));
-
-    var actions = el("div", { style:"display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px;" });
-    var scanBtn = el("button", { class:"primary smallBtn", type:"button" }, "Rescan Recent");
-    scanBtn.onclick = function(){ ScanDuplicates(); };
-    var refreshBtn = el("button", { class:"dark smallBtn", type:"button" }, "Refresh");
-    refreshBtn.onclick = function(){ LoadDuplicateQueue(); };
-
-    actions.appendChild(scanBtn);
-    actions.appendChild(refreshBtn);
-    panel.appendChild(actions);
-
-    panel.appendChild(el("div", { id:"dupMsg", style:"margin-top:10px; min-height:18px; font-size:14px;" }, ""));
-    panel.appendChild(el("div", { id:"dupHolder", style:"margin-top:10px;" }, ""));
-
-    var mod = document.getElementById("panelModeration");
-    if(mod && mod.parentNode) {
-      mod.parentNode.insertBefore(panel, mod.nextSibling);
-    } else {
-      box.appendChild(panel);
-    }
-
-    var _ShowTab = window.ShowTab;
-    if(typeof _ShowTab !== "function") return;
-
-    window.ShowTab = function(which){
-      _ShowTab(which === "duplicates" ? "reports" : which);
-
-      var tabRep = document.getElementById("tabReports");
-      var tabMod = document.getElementById("tabModeration");
-      var tabDup = document.getElementById("tabDuplicates");
-
-      var panRep = document.getElementById("panelReports");
-      var panMod = document.getElementById("panelModeration");
-      var panDup = document.getElementById("panelDuplicates");
-
-      if(!tabDup || !panDup) return;
-
-      if(which === "duplicates"){
-        if(tabRep) tabRep.classList.remove("active");
-        if(tabMod) tabMod.classList.remove("active");
-        tabDup.classList.add("active");
-
-        if(panRep) panRep.style.display = "none";
-        if(panMod) panMod.style.display = "none";
-        panDup.style.display = "block";
-
-        if(typeof window.HideDetail === "function") window.HideDetail();
-        LoadDuplicateQueue();
-      } else {
-        tabDup.classList.remove("active");
-        panDup.style.display = "none";
-      }
-    };
-  }
-
-  function setDupMsg(text, color){
-    var m = document.getElementById("dupMsg");
-    if(!m) return;
-    m.style.color = color || "red";
-    m.innerText = text || "";
-  }
-
-  function getTokenSafe(){
-    return (typeof window.getToken === "function") ? window.getToken() : (localStorage.getItem("token") || "");
-  }
-
-  async function LoadDuplicateQueue(){
-    var holder = document.getElementById("dupHolder");
-    if(holder) holder.innerHTML = "";
-    setDupMsg("");
-
-    var token = getTokenSafe();
-    if(!token) { setDupMsg("Missing token. Please login again.", "red"); return; }
-
-    try {
-      var result = await window.apiFetch("/api/duplicates/pending", {
-        method: "GET",
-        headers: { "Authorization": "Bearer " + token }
-      });
-
-      if (result.res.status === 401) { window.forceLogout("Session expired. Please login again."); return; }
-      if (result.res.status === 403) { window.forceLogout("Forbidden. You are not a manager account."); return; }
-
-      var data = result.data || {};
-      if (!result.res.ok || !data.ok) {
-        setDupMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
-        return;
-      }
-
-      var list = data.data || [];
-      RenderDuplicateQueue(list);
-
-      if(list.length === 0) setDupMsg("No pending duplicate suggestions.", "green");
-      else setDupMsg("Pending duplicate suggestions: " + list.length, "green");
-    } catch (e) {
-      setDupMsg("Connection error.", "red");
-    }
-  }
-
-  function esc(s){
-    if(typeof window.EscapeHtml === "function") return window.EscapeHtml(String(s||""));
-  
-    return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-  }
-
-  function RenderDuplicateQueue(list){
-    var holder = document.getElementById("dupHolder");
-    if(!holder) return;
-
-    if(!list || list.length === 0){
-      holder.innerHTML = "";
-      return;
-    }
-
-    var html = "<table>";
-    html += "<tr><th>Flagged</th><th>Category</th><th>Score</th><th>Overlap</th><th>Older (kept)</th><th>Newer (merged)</th><th>Actions</th></tr>";
-
-    for(var i=0;i<list.length;i++){
-      var x = list[i];
-
-      // choose older/newer for display only
-      var baseIsOlder = new Date(x.base_created_at).getTime() <= new Date(x.cand_created_at).getTime();
-      var olderId = baseIsOlder ? x.base_id : x.candidate_id;
-      var newerId = baseIsOlder ? x.candidate_id : x.base_id;
-
-      var olderSubj = baseIsOlder ? x.base_subject : x.cand_subject;
-      var newerSubj = baseIsOlder ? x.cand_subject : x.base_subject;
-
-      var olderDept = baseIsOlder ? x.base_department : x.cand_department;
-      var newerDept = baseIsOlder ? x.cand_department : x.base_department;
-
-      var olderUp = baseIsOlder ? x.base_upvotes : x.cand_upvotes;
-      var newerUp = baseIsOlder ? x.cand_upvotes : x.base_upvotes;
-
-      html += "<tr>";
-      html += "<td>" + esc(x.flagged_at||"") + "</td>";
-      html += "<td>" + esc(x.category||"") + "</td>";
-      html += "<td>" + esc((Number(x.score||0)).toFixed(2)) + "</td>";
-      html += "<td>" + esc(x.overlap_keywords||"") + "</td>";
-      html += "<td><div class='pill'>#" + esc(olderId) + "</div> " + esc(olderDept||"") + "<br><b>" + esc(olderSubj||"") + "</b><br><span class='small'>upvotes: " + esc(olderUp||0) + "</span></td>";
-      html += "<td><div class='pill'>#" + esc(newerId) + "</div> " + esc(newerDept||"") + "<br><b>" + esc(newerSubj||"") + "</b><br><span class='small'>upvotes: " + esc(newerUp||0) + "</span></td>";
-      html += "<td>";
-      html += "<button class='primary smallBtn' onclick='window.__dupMerge(" + esc(x.pair_id) + "," + esc(olderId) + "," + esc(newerId) + ")'>Merge</button>";
-      html += "<button class='dark smallBtn' onclick='window.__dupIgnore(" + esc(x.pair_id) + ")'>Ignore</button>";
-      html += "</td>";
-      html += "</tr>";
-    }
-
-    html += "</table>";
-    holder.innerHTML = html;
-  }
-
-  window.__dupIgnore = async function(pairId){
-    if(!confirm("Ignore this duplicate suggestion?")) return;
-    var token = getTokenSafe();
-    try{
-      var result = await window.apiFetch("/api/duplicates/" + pairId + "/ignore", {
-        method: "POST",
-        headers: { "Authorization": "Bearer " + token }
-      });
-      var data = result.data || {};
-      if(!result.res.ok || !data.ok){
-        setDupMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
-        return;
-      }
-      setDupMsg("Ignored.", "green");
-      LoadDuplicateQueue();
-    }catch(e){
-      setDupMsg("Connection error.", "red");
-    }
-  };
-
-  window.__dupMerge = async function(pairId, masterId, dupId){
-    if(!confirm("Merge these items?\n\n- Upvotes will be combined.\n- The newer item will be hidden from employees.\n- Original timestamps stay in the database (audit log).")) return;
-    var token = getTokenSafe();
-
-    try{
-      var result = await window.apiFetch("/api/duplicates/merge", {
-        method: "POST",
-        headers: { "Content-Type":"application/json", "Authorization": "Bearer " + token },
-        body: JSON.stringify({ pair_id: pairId, master_id: masterId, duplicate_id: dupId })
-      });
-      var data = result.data || {};
-      if(!result.res.ok || !data.ok){
-        setDupMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
-        return;
-      }
-      setDupMsg("Merged into #" + data.master_id + " (new upvotes: " + data.upvotes + ").", "green");
-
-      // Refresh duplicates + main feedback list
-      LoadDuplicateQueue();
-      if(typeof window.LoadFeedbackForManager === "function") window.LoadFeedbackForManager();
-    }catch(e){
-      setDupMsg("Connection error.", "red");
-    }
-  };
-
-  async function ScanDuplicates(){
-    if(!confirm("Rescan recent feedback for duplicates? (This can take a few seconds.)")) return;
-    setDupMsg("Scanning...", "#444");
-    var token = getTokenSafe();
-    try{
-      var result = await window.apiFetch("/api/duplicates/scan", {
-        method: "POST",
-        headers: { "Content-Type":"application/json", "Authorization": "Bearer " + token },
-        body: JSON.stringify({ limit: 80 })
-      });
-      var data = result.data || {};
-      if(!result.res.ok || !data.ok){
-        setDupMsg((data && (data.error || data.message)) || ("HTTP " + result.res.status), "red");
-        return;
-      }
-      setDupMsg(data.message || "Scan complete.", "green");
-      LoadDuplicateQueue();
-    }catch(e){
-      setDupMsg("Connection error.", "red");
-    }
-  }
-
-  window.addEventListener("load", function(){
-    ensureDuplicatesTab();
-  });
-})();
-</script>
-
-
-<script>
-
-(function(){
-  function escapeHtml(s){
-    return String(s || "").replace(/[&<>"']/g, function(ch){
-      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]);
-    });
-  }
-
-  function normalizeHeading(h){
-    h = String(h || "").trim().toLowerCase();
-    if (h.indexOf("what happened") === 0) return "What happened?";
-    if (h.indexOf("impact") === 0) return "Impact";
-    if (h.indexOf("suggest") === 0) return "Suggestion";
-    return h;
-  }
-
-  function formatGuidedPrompts(text){
-    var t = String(text || "");
-    
-    if (!/what\s*happened|\bimpact\b|\bsuggestion\b/i.test(t)) {
-      return '<div class="gp-plain">' + escapeHtml(t) + '</div>';
-    }
-
-    var re = /(^|\n)\s*(what\s*happened\??|impact|suggestion)\s*[:\-]?\s*/ig;
-    var parts = [];
-    var lastIdx = 0;
-    var match;
-
-    while ((match = re.exec(t)) !== null) {
-      var idx = match.index;
-      var head = match[2];
-     
-      if (parts.length === 0 && idx > 0) {
-        var intro = t.slice(0, idx).trim();
-        if (intro) parts.push({ type:"intro", text:intro });
-      }
-      parts.push({ type:"heading", heading: head, start: re.lastIndex });
-      lastIdx = re.lastIndex;
-    }
-
-    if (parts.length === 0) {
-      return '<div class="gp-plain">' + escapeHtml(t) + '</div>';
-    }
-
-    for (var i = 0; i < parts.length; i++) {
-      if (parts[i].type !== "heading") continue;
-      var start = parts[i].start;
-     
-      var end = t.length;
-      var sub = t.slice(start);
-      var m2 = sub.match(/(\n)\s*(what\s*happened\??|impact|suggestion)\s*[:\-]?\s*/i);
-      if (m2 && m2.index !== undefined) end = start + m2.index;
-      var ans = t.slice(start, end).trim();
-      parts[i].answer = ans;
-    }
-
-    var html = '<div class="gp">';
-    for (var j = 0; j < parts.length; j++) {
-      var p = parts[j];
-      if (p.type === "intro") {
-        html += '<div class="gp-intro">' + escapeHtml(p.text) + '</div>';
-      } else if (p.type === "heading") {
-        html += '<div class="gp-label">' + escapeHtml(normalizeHeading(p.heading)) + '</div>';
-        html += '<div class="gp-answer">' + escapeHtml(p.answer || "") + '</div>';
-      }
-    }
-    html += '</div>';
-    return html;
-  }
-
-  function injectStyles(){
-    if (document.getElementById("gpStyles")) return;
-    var css = ''
-      + '.gp{ line-height:1.35; }'
-      + '.gp-label{ font-weight:bold; margin-top:6px; }'
-      + '.gp-answer{ margin-left:16px; }'
-      + '.gp-intro{ margin-bottom:6px; }'
-      + '.gp-plain{ white-space:pre-wrap; }';
-    var style = document.createElement("style");
-    style.id = "gpStyles";
-    style.appendChild(document.createTextNode(css));
-    document.head.appendChild(style);
-  }
-
-  function postProcessTable(){
-    injectStyles();
-    var holder = document.getElementById("tableHolder");
-    if (!holder) return;
-    var table = holder.querySelector("table");
-    if (!table) return;
-
-    var rows = table.querySelectorAll("tr");
-    for (var i = 1; i < rows.length; i++) { 
-      var tds = rows[i].querySelectorAll("td");
-      if (tds && tds.length >= 5) {
-        var cell = tds[4];
-        if (cell && !cell.getAttribute("data-gp")) {
-          var raw = cell.textContent || "";
-          cell.innerHTML = formatGuidedPrompts(raw);
-          cell.setAttribute("data-gp", "1");
-        }
-      }
-    }
-  }
-
-  function postProcessDetail(){
-    injectStyles();
-    var panel = document.getElementById("detailPanel");
-    if (!panel) return;
-    var textEl = panel.querySelector(".text");
-    if (!textEl) return;
-    if (textEl.getAttribute("data-gp")) return;
-    var raw = textEl.textContent || "";
-    textEl.innerHTML = formatGuidedPrompts(raw);
-    textEl.setAttribute("data-gp", "1");
-  }
-
-  window.addEventListener("load", function(){
-    try {
-      if (typeof RenderTable === "function" && !RenderTable.__gpWrapped) {
-        var _rt = RenderTable;
-        RenderTable = function(list){
-          _rt(list);
-          postProcessTable();
-        };
-        RenderTable.__gpWrapped = true;
-      }
-      if (typeof ShowDetail === "function" && !ShowDetail.__gpWrapped) {
-        var _sd = ShowDetail;
-        ShowDetail = function(id){
-          _sd(id);
-          setTimeout(postProcessDetail, 0);
-        };
-        ShowDetail.__gpWrapped = true;
-      }
-    } catch (e) {
-    }
-  });
-})();
-</script>
-
+    <div class="box">
+        <h2>Manager Dashboard</h2>
+
+        <div class="tabs">
+            <div id="tabReports" class="tab active" onclick="ShowTab('reports')">Reports</div>
+            <div id="tabModeration" class="tab" onclick="ShowTab('moderation')">Moderation Queue</div>
+            <div style="flex:1"></div>
+        </div>
+
+        <div id="panelReports">
+            <div class="controls">
+                <div class="control">
+                    <label for="ddlDepartmentFilter">Department</label>
+                    <select id="ddlDepartmentFilter" onchange="RenderFromControls()">
+                        <option value="ALL">All Departments</option>
+                    </select>
+                </div>
+
+                <div class="control">
+                    <label for="ddlCategoryFilter">Category</label>
+                    <select id="ddlCategoryFilter" onchange="RenderFromControls()">
+                        <option value="ALL">All Categories</option>
+                    </select>
+                </div>
+
+                <div class="control">
+                    <label for="ddlSort">Sort</label>
+                    <select id="ddlSort" onchange="RenderFromControls()">
+                        <option value="MOST_UPVOTED">Most Upvoted</option>
+                        <option value="NEWEST">Newest</option>
+                        <option value="OLDEST">Oldest</option>
+                    </select>
+                </div>
+
+                <div class="control">
+                    <button class="primary" onclick="LoadFeedbackForManager()">Refresh</button>
+                    <button class="dark" onclick="ClearAllFeedback()">Clear All</button>
+                    <button class="dark" onclick="Logout()">Logout</button>
+                </div>
+            </div>
+
+            <div id="msg"></div>
+            <div id="tableHolder"></div>
+
+            <div id="detailPanel" class="detailPanel">
+                <h3 id="detailSubject"></h3>
+                <div id="detailMeta" class="meta"></div>
+                <div id="detailText" class="text"></div>
+
+                <div class="row">
+                    <div>
+                        <label for="ddlStatus">Status</label>
+                        <select id="ddlStatus">
+                            <option value="Open">Open</option>
+                            <option value="In Progress">In Progress</option>
+                            <option value="Resolved">Resolved</option>
+                            <option value="Closed">Closed</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label for="txtResponse">Manager Response</label>
+                        <textarea id="txtResponse" rows="5" placeholder="Write a response..."></textarea>
+                        <div id="respMeta" class="meta"></div>
+                    </div>
+                </div>
+
+                <button class="primary" onclick="SaveStatusAndResponse()">Save Status/Response</button>
+            </div>
+        </div>
+
+        <div id="panelModeration" style="display:none;">
+            <p class="note">Flagged submissions are hidden from employees until you approve them.</p>
+            <button class="primary" onclick="LoadFlaggedQueue()">Refresh Flagged Queue</button>
+            <div id="flaggedHolder" style="margin-top:12px;"></div>
+        </div>
+    </div>
 </body>
 </html>
